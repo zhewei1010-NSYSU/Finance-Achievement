@@ -2,7 +2,7 @@
 
 一個使用 **React、TypeScript、Vite、Tailwind CSS** 建立的繁體中文個人理財網站。使用 Recharts 呈現互動式圖表，以 Zod 驗證資料。支援手機、桌面與深色模式，財務資料儲存在目前瀏覽器的 localStorage。
 
-**沒有後端、登入、銀行 API、雲端資料庫、分析追蹤或自動部署。沒有設定 GitHub Pages。** GitHub 只用來存放程式碼；請將儲存庫維持為 Private。網站的本機財務資料不會自動寫入程式碼或 Git。
+**沒有後端、登入、銀行 API、雲端資料庫或分析追蹤。** 儲存庫維持 Private；另提供手動 GitHub Pages 部署流程，經使用者確認後可公開網站。網站的本機財務資料不會自動寫入程式碼或 Git。推送程式碼不會自動部署。
 
 ## Windows 新手：從安裝到開啟網站
 
@@ -65,6 +65,22 @@ npm.cmd run preview -- --port 4173 --strictPort
 ```
 
 `dist/` 是建置結果，不會自動部署。預覽使用另一個連接埠，因此與開發網址的本機財務資料分開；要帶入資料請使用 JSON 備份。不要直接雙擊 `dist/index.html`。
+
+## GitHub Pages：公開網站、程式碼維持私人
+
+已提供 `.github/workflows/pages.yml` 手動部署流程。它會安裝鎖定依賴、跑單元測試、以 `/Finance-Achievement/` 路徑建置，再只上傳 `dist/`；官方 Actions 固定為已核對的 commit SHA。不需要另外建立或填入部署 Token。
+
+私人儲存庫使用 Pages 通常需要 **GitHub Pro、Team 或 Enterprise**，以 GitHub 實際顯示的資格為準；若提示升級，不要為了啟用 Pages 將儲存庫改成公開。[GitHub 官方說明](https://docs.github.com/en/pages/getting-started-with-github-pages/about-github-pages)
+
+1. 進入 GitHub 儲存庫 → **Settings → Pages**。
+2. 在 **Build and deployment → Source** 選擇 **GitHub Actions**。
+3. 進入 **Actions → Deploy GitHub Pages → Run workflow**，分支選 `main`，按 **Run workflow**。
+4. 等待 `build` 與 `deploy` 均成功，在該次執行的 `github-pages` environment 查看實際發布網址。
+5. 之後更新程式碼仍需手動執行工作流程，不會每次推送都發布。停用請到 Settings → Pages 使用 Unpublish site。
+
+Pages 網站沒有登入保護，任何知道網址的人都可以開啟。每個瀏覽器仍使用自己的本機資料，別人開啟網站不會看到你瀏覽器裡的餘額。前端 JavaScript 會送給訪客瀏覽器，請勿將任何密碼、金鑰或真實財務備份寫入程式碼或部署產物。
+
+**換到 Pages 網址時，本機資料不會自動搬過去。** 先在原本本機網站匯出 JSON，再到 Pages 網站匯入；確認資料正確後再繼續記帳。Pages 同樣不提供資料同步、加密或還原保證，請持續備份。
 
 ## 第一次使用
 
