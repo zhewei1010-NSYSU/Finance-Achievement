@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { X, ArrowUpRight, Sprout, PiggyBank } from 'lucide-react'
+import PinkPig from './PinkPig'
+import { X, ArrowUpRight, Sprout } from 'lucide-react'
 
 export function Modal({
   title,
@@ -138,7 +139,17 @@ export function Empty({ children }: { children: ReactNode }) {
     </div>
   )
 }
-export function Ring({ value, large = false }: { value: number; large?: boolean }) {
+export function Ring({
+  value,
+  large = false,
+  animationKey = 0,
+  celebrating = false,
+}: {
+  value: number
+  large?: boolean
+  animationKey?: number
+  celebrating?: boolean
+}) {
   const target = Math.min(100, Math.max(0, value))
   const [displayed, setDisplayed] = useState(target)
   const current = useRef(target)
@@ -186,6 +197,7 @@ export function Ring({ value, large = false }: { value: number; large?: boolean 
         <circle className="ring-track" cx="112" cy="112" r={r} />
         <circle
           className="ring-value"
+          strokeOpacity={displayed === 0 ? 0 : 1}
           cx="112"
           cy="112"
           r={r}
@@ -195,8 +207,27 @@ export function Ring({ value, large = false }: { value: number; large?: boolean 
         />
       </svg>
       <div className="ring-center" aria-hidden="true">
-        <span className="piggy-icon">
-          <PiggyBank strokeWidth={1.25} />
+        <span
+          key={animationKey}
+          className={`pig-scene ${animationKey ? 'deposit-active' : ''} ${celebrating ? 'celebrate-pig' : ''}`}
+        >
+          <PinkPig />
+          {animationKey > 0 && (
+            <span className="falling-coins">
+              {[0, 1, 2].map((i) => (
+                <svg key={i} viewBox="0 0 32 32" style={{ animationDelay: `${i * 0.16}s` }}>
+                  <circle cx="16" cy="16" r="13" fill="#EBC873" stroke="#D6AE50" strokeWidth="2" />
+                  <path
+                    d="M16 8v16m5-13c-7-5-14 4-5 6 9 3 0 10-6 5"
+                    stroke="#B58D35"
+                    strokeWidth="1.5"
+                    fill="none"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ))}
+            </span>
+          )}
         </span>
         <strong data-testid="animated-percent">
           {Math.floor(displayed + 0.000001)}

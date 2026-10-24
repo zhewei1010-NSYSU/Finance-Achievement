@@ -1,142 +1,341 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight,
+  ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
   Check,
   CheckCheck,
   ChevronRight,
-  CircleHelp,
-  Heart,
+  Flag,
+  Landmark,
   LayoutDashboard,
+  List,
   MoreHorizontal,
+  Mountain,
   PiggyBank,
   Plus,
+  Settings2,
   ShieldCheck,
   Sparkles,
+  Tags,
   Target,
   Trash2,
   Trophy,
+  Wallet,
   X,
 } from 'lucide-react'
-import { money } from './lib/finance'
-import { loadQuests, QUEST_KEY, questDataSchema, reconcileQuests, stats } from './lib/quests'
-import type { Quest, QuestData } from './lib/quests'
-import { GoalForm } from './components/Forms'
-import { Empty, Field, Modal, MoneyInput, Ring } from './components/UI'
-type Page = 'home' | 'goals'
+import { money, today, uid } from './lib/finance'
+import {
+  accountTotals,
+  annualIncome,
+  balances,
+  BOOK_KEY,
+  categorySchema,
+  depositRows,
+  loadBook,
+  periodStats,
+  progress,
+  reconcileBook,
+  removeAccount,
+  removeGoal,
+  replaceRecord,
+  saveAccount,
+  saveGoal,
+} from './lib/ledger'
+import type { Book, BookAccount, Category, RecordItem, SavingGoal } from './lib/ledger'
+import { AccountForm, LifeForm, RecordForm, SavingForm } from './components/BookForms'
+import { Empty, Field, Modal, Ring } from './components/UI'
+
+type Page = 'home' | 'deposits' | 'accounts' | 'records' | 'goals'
 type Dialog =
-  | { type: 'goal'; goal?: Quest }
-  | { type: 'deposit'; goal: Quest }
-  | { type: 'delete'; goal: Quest }
+  | {
+      type: 'record'
+      record?: RecordItem
+      deposit?: boolean
+      goalId?: string
+      initialType?: RecordItem['type']
+    }
+  | { type: 'account'; account?: BookAccount }
+  | { type: 'goal'; goal?: SavingGoal }
+  | { type: 'life' }
   | { type: 'history' }
   | { type: 'help' }
+  | { type: 'categories' }
+  | { type: 'category'; category?: Category }
+  | { type: 'confirm'; title: string; message: string; run: () => void }
   | null
 const pages = [
-  { id: 'home', label: '儲蓄首頁', icon: LayoutDashboard },
-  { id: 'goals', label: '我的目標', icon: Target },
+  { id: 'home', name: '首頁', icon: LayoutDashboard },
+  { id: 'deposits', name: '存錢明細', icon: PiggyBank },
+  { id: 'accounts', name: '帳戶總覽', icon: Wallet },
+  { id: 'records', name: '收支紀錄', icon: List },
+  { id: 'goals', name: '儲蓄目標', icon: Target },
 ] as const
 export default function App() {
-  const [loaded] = useState(loadQuests),
-    [data, setData] = useState(loaded.data)
-  const [page, setPage] = useState<Page>('home'),
-    [selected, setSelected] = useState('')
-  const [dialog, setDialog] = useState<Dialog>(null),
-    [celebrations, setCelebrations] = useState<Quest[]>([])
-  const [notice, setNotice] = useState(''),
-    [storageError, setStorageError] = useState(loaded.error ?? '')
-  const closeDialog = useCallback(() => setDialog(null), []),
+  const [loaded] = useState(loadBook),
+    [book, setBook] = useState(loaded.book),
+    [page, setPage] = useState<Page>('home'),
+    [selected, setSelected] = useState(''),
+    [dialog, setDialog] = useState<Dialog>(null),
+    [celebrations, setCelebrations] = useState<SavingGoal[]>([]),
+    [notice, setNotice] = useState(''),
+    [error, setError] = useState(loaded.error ?? ''),
+    [month, setMonth] = useState(today().slice(0, 7)),
+    [descending, setDescending] = useState(true),
+    [year, setYear] = useState(Number(today().slice(0, 4))),
+    [animation, setAnimation] = useState({ id: '', key: 0, happy: false })
+  const savedRef = useRef<string | null>(null)
+  const close = useCallback(() => setDialog(null), []),
     closeCelebration = useCallback(() => setCelebrations((q) => q.slice(1)), [])
   useEffect(() => {
     document.documentElement.dataset.theme = 'light'
     if (loaded.error) return
     try {
-      localStorage.setItem(QUEST_KEY, JSON.stringify(loaded.data))
+      const raw = JSON.stringify(loaded.book)
+      localStorage.setItem(BOOK_KEY, raw)
+      savedRef.current = raw
       if (loaded.migrated)
-        setNotice('原有目標已帶入；曾共用金額的目標已按比例分配，原始資料仍保留。')
+        setNotice('原有帳戶、目標與紀錄已帶入。舊版原始資料仍保留，沒有新增虛構收入。')
     } catch {
-      setStorageError('瀏覽器無法儲存，請檢查可用空間與網站儲存權限。')
+      setError('無法儲存本機資料，請檢查瀏覽器空間與網站權限。')
     }
   }, [loaded])
   useEffect(() => {
     if (!notice) return
-    const timer = setTimeout(() => setNotice(''), 5000)
+    const timer = setTimeout(() => setNotice(''), 5500)
     return () => clearTimeout(timer)
   }, [notice])
-  function commit(next: QuestData) {
-    if (loaded.error) throw new Error('原始資料尚未修復，已暫停編輯以保護內容。')
-    const result = reconcileQuests(questDataSchema.parse(next))
-    try {
-      localStorage.setItem(QUEST_KEY, JSON.stringify(result.data))
-    } catch {
-      setStorageError('儲存失敗，這次變更未套用。請檢查瀏覽器空間與網站儲存權限後重試。')
-      throw new Error('無法儲存，這次變更未套用。')
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key === BOOK_KEY && e.newValue !== savedRef.current)
+        setError('另一個分頁已更新資料，請重新整理後再編輯，避免覆蓋新資料。')
     }
-    setStorageError('')
-    setData(result.data)
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
+  useEffect(() => {
+    if (!animation.key) return
+    const eventKey = animation.key
+    const timer = setTimeout(
+      () =>
+        setAnimation((event) =>
+          event.key === eventKey ? { id: '', key: 0, happy: false } : event,
+        ),
+      2400,
+    )
+    return () => clearTimeout(timer)
+  }, [animation.key])
+  const primary =
+      book.goals.find((g) => g.id === selected) ??
+      book.goals.find((g) => !g.completedAt) ??
+      book.goals[0],
+    b = balances(book),
+    total = accountTotals(book),
+    monthly = periodStats(book, today().slice(0, 7)),
+    annual = annualIncome(book, year),
+    lifePercent = Math.min(100, (annual / book.life.targetIncome) * 100),
+    completed = book.goals.filter((g) => g.completedAt)
+  function commit(next: Book, animate = false) {
+    if (loaded.error) throw new Error('原始資料尚未修復，已暫停編輯。')
+    const result = reconcileBook(next)
+    try {
+      if (localStorage.getItem(BOOK_KEY) !== savedRef.current)
+        throw new Error('資料已由其他分頁更新，請先重新整理。')
+      const raw = JSON.stringify(result.book)
+      localStorage.setItem(BOOK_KEY, raw)
+      savedRef.current = raw
+    } catch (e) {
+      const message =
+        e instanceof Error && e.message.includes('其他分頁')
+          ? e.message
+          : '儲存失敗，這次變更未套用。請檢查儲存空間與權限。'
+      setError(message)
+      throw new Error(message)
+    }
+    if (animate) {
+      const updatedBalances = balances(result.book)
+      const candidates = primary
+        ? [primary, ...result.book.goals.filter((g) => g.id !== primary.id)]
+        : result.book.goals
+      const increased = candidates.find(
+        (g) => (updatedBalances.get(g.accountId) ?? 0) > (b.get(g.accountId) ?? 0),
+      )
+      if (increased)
+        setAnimation((e) => ({
+          id: increased.accountId,
+          key: e.key + 1,
+          happy: result.completed.some((g) => g.accountId === increased.accountId),
+        }))
+    }
+    setError('')
+    setBook(result.book)
     setCelebrations((q) => [...q, ...result.completed])
   }
   const navigate = (next: Page) => {
     setPage(next)
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
-  const primary =
-    data.goals.find((g) => g.id === selected) ??
-    data.goals.find((g) => !g.completedAt) ??
-    data.goals[0]
-  const completed = data.goals.filter((g) => g.completedAt)
-  function renderGoal(goal: Quest, featured = false) {
-    const s = stats(goal, data.plan)
+  const confirm = (title: string, message: string, run: () => void) =>
+    setDialog({ type: 'confirm', title, message, run })
+  const sorted = (items: RecordItem[]) =>
+    items
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => (descending ? -1 : 1) * (a.r.date.localeCompare(b.r.date) || a.i - b.i))
+      .map((x) => x.r)
+  const openRecord = (r: RecordItem) =>
+    setDialog({ type: 'record', record: r, deposit: !!r.goalId, goalId: r.goalId })
+  const deleteRecord = (r: RecordItem) =>
+    confirm(
+      '刪除這筆紀錄？',
+      '系統會重新計算帳戶餘額、累積存款與目標進度。若造成餘額不足或超額還款，會阻止刪除。',
+      () => {
+        commit(replaceRecord(book, r.id), true)
+        setNotice('紀錄已刪除，帳戶與目標已同步更新。')
+      },
+    )
+  const allDeposits = depositRows(book),
+    filteredDeposits = allDeposits.filter((x) => !month || x.record.date.startsWith(month)),
+    depositTotal = allDeposits.reduce((s, x) => s + x.record.amount, 0),
+    monthDeposits = filteredDeposits.reduce((s, x) => s + x.record.amount, 0)
+  const recordList = (items: RecordItem[], deposits = false) => {
+    const after = new Map(allDeposits.map((x) => [x.record.id, x.after]))
     return (
-      <article className={`savings-card ${featured ? 'featured' : ''}`} key={goal.id}>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>日期／備註</th>
+              <th>{deposits ? '本次存入' : '類型／類別'}</th>
+              <th>{deposits ? '存入帳戶／目標' : '帳戶'}</th>
+              <th className="align-right">{deposits ? '存款後累積金額' : '金額'}</th>
+              <th>
+                <span className="sr-only">操作</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <b>
+                    {r.note || { income: '收入', expense: '支出', transfer: '帳戶轉帳' }[r.type]}
+                  </b>
+                  <small>{r.date.replaceAll('-', '/')}</small>
+                </td>
+                <td>
+                  {deposits ? (
+                    <b>{money(r.amount)}</b>
+                  ) : (
+                    <>
+                      <span className={`record-tag ${r.type}`}>
+                        {{ income: '收入', expense: '支出', transfer: '轉帳' }[r.type]}
+                      </span>
+                      <small>
+                        {book.categories.find((c) => c.id === r.categoryId)?.name ?? '不列入收支'}
+                      </small>
+                    </>
+                  )}
+                </td>
+                <td>
+                  <b>
+                    {
+                      book.accounts.find(
+                        (a) =>
+                          a.id ===
+                          (deposits
+                            ? r.type === 'transfer'
+                              ? r.toAccountId
+                              : r.accountId
+                            : r.accountId),
+                      )?.name
+                    }
+                  </b>
+                  <small>
+                    {deposits
+                      ? book.goals.find((g) => g.id === r.goalId)?.name
+                      : r.toAccountId
+                        ? `→ ${book.accounts.find((a) => a.id === r.toAccountId)?.name}`
+                        : r.settled
+                          ? '舊版已結算紀錄'
+                          : ''}
+                  </small>
+                </td>
+                <td className="align-right number">
+                  {money(deposits ? (after.get(r.id) ?? 0) : r.amount)}
+                </td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      className="icon-button"
+                      aria-label={`編輯紀錄${r.note || r.date}`}
+                      onClick={() => openRecord(r)}
+                    >
+                      <Settings2 size={15} />
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      aria-label={`刪除紀錄${r.note || r.date}`}
+                      onClick={() => deleteRecord(r)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!items.length && <Empty>目前沒有紀錄，從今天的第一筆開始。</Empty>}
+      </div>
+    )
+  }
+  const savingCard = (g: SavingGoal, large = false) => {
+    const s = progress(book, g)
+    return (
+      <article className={`savings-card ${large ? 'featured' : ''}`} key={g.id}>
         <div className="goal-card-header">
           <span className="goal-badge">
-            <span />
-            {s.percent >= 100 ? '目標已達成' : '慢慢存，慢慢靠近'}
+            {book.accounts.find((a) => a.id === g.accountId)?.name} ·{' '}
+            {s.percent >= 100 ? '目標已達成' : '正在累積中'}
           </span>
           <button
             className="icon-button"
-            aria-label={`編輯${goal.name}`}
-            onClick={() => setDialog({ type: 'goal', goal })}
+            aria-label={`編輯${g.name}`}
+            onClick={() => setDialog({ type: 'goal', goal: g })}
           >
             <MoreHorizontal size={22} />
           </button>
         </div>
         <div className="goal-intro">
-          <span className="eyebrow">
-            {featured ? 'MY SAVINGS GOAL' : 'ONE GOAL, ONE LITTLE STEP'}
-          </span>
-          <h2>{goal.name}</h2>
-          <p>每一筆小小的累積，都在讓夢想更近一點。</p>
+          <h2>{g.name}</h2>
+          <p>每次存下一點，就離喜歡的未來更近一點。</p>
         </div>
         <div className="progress-focus">
-          <Ring key={goal.id} value={s.percent} large={featured} />
-          <p className={`progress-message ${s.percent > 80 ? 'near' : ''}`} aria-live="polite">
-            {s.percent >= 100 ? (
-              <>
-                <CheckCheck size={18} />
-                恭喜！儲蓄目標達成！
-              </>
-            ) : s.percent > 80 ? (
-              <>
-                <Sparkles size={17} />
-                快達標了！離目標只差一點點！
-              </>
-            ) : s.percent === 0 ? (
-              '從第一筆開始，為夢想存一點。'
-            ) : (
-              '存錢有在前進，每一步都算數。'
-            )}
+          <Ring
+            key={g.id}
+            value={s.percent}
+            large={large}
+            animationKey={animation.id === g.accountId ? animation.key : 0}
+            celebrating={animation.id === g.accountId && animation.happy}
+          />
+          <p className={`progress-message ${s.percent >= 100 ? 'success' : ''}`} aria-live="polite">
+            {s.percent >= 100
+              ? '恭喜！儲蓄目標達成！'
+              : animation.id === g.accountId && animation.key
+                ? '又更接近目標了！'
+                : s.percent > 80
+                  ? '快達標了！離目標只差一點點！'
+                  : '為每一次認真存錢的自己，開心一下。'}
           </p>
         </div>
         <dl className="goal-details">
           <div>
             <dt>目前已存</dt>
-            <dd className="saved-amount">{money(goal.saved)}</dd>
+            <dd>{money(s.saved)}</dd>
           </div>
           <div>
             <dt>目標金額</dt>
-            <dd>{money(goal.target)}</dd>
+            <dd>{money(g.target)}</dd>
           </div>
           <div>
             <dt>尚差金額</dt>
@@ -152,39 +351,43 @@ export default function App() {
         </dl>
         <div className="target-date">
           <span>
-            <CalendarDays size={16} />
+            <CalendarDays size={15} />
             目標日期
           </span>
-          <time dateTime={goal.deadline}>{goal.deadline.replaceAll('-', '/')}</time>
+          <time>{g.deadline.replaceAll('-', '/')}</time>
         </div>
         <div className="goal-bottom">
           <button
             className="button primary"
             disabled={!!loaded.error}
-            onClick={() => setDialog({ type: 'deposit', goal })}
+            onClick={() => setDialog({ type: 'record', deposit: true, goalId: g.id })}
           >
-            <Plus size={18} />
-            存一筆
+            <Plus size={17} />
+            新增存款
           </button>
-          <button className="button secondary" onClick={() => setDialog({ type: 'goal', goal })}>
+          <button className="button secondary" onClick={() => setDialog({ type: 'goal', goal: g })}>
             調整目標
             <ArrowUpRight size={16} />
           </button>
         </div>
-        {!featured && (
+        {!large && (
           <div className="quest-tools">
-            {goal.completedAt && (
-              <button className="text-button" onClick={() => setCelebrations([goal])}>
-                <Trophy size={14} />
+            {g.completedAt && (
+              <button className="text-button" onClick={() => setCelebrations([g])}>
                 查看完成紀錄
               </button>
             )}
             <button
-              className="icon-button danger"
-              aria-label={`刪除${goal.name}`}
-              onClick={() => setDialog({ type: 'delete', goal })}
+              className="text-button danger"
+              onClick={() =>
+                confirm(
+                  '刪除這個儲蓄目標？',
+                  '存款與收支紀錄會保留，只解除目標關聯；帳戶餘額不會被刪除。',
+                  () => commit(removeGoal(book, g.id)),
+                )
+              }
             >
-              <Trash2 size={16} />
+              刪除目標
             </button>
           </div>
         )}
@@ -196,8 +399,8 @@ export default function App() {
       <header className="site-header">
         <div className="header-inner">
           <a
-            href="#"
             className="brand"
+            href="#"
             onClick={(e) => {
               e.preventDefault()
               navigate('home')
@@ -207,77 +410,125 @@ export default function App() {
               <PiggyBank size={26} strokeWidth={1.7} />
             </span>
             <span>
-              my savings<span className="brand-dot">.</span>
+              我的理財手帳<span className="brand-dot">.</span>
             </span>
           </a>
           <nav className="main-nav" aria-label="主選單">
             {pages.map((p) => (
               <button
                 key={p.id}
-                aria-label={p.label}
+                aria-label={p.name}
                 aria-current={page === p.id ? 'page' : undefined}
                 className={page === p.id ? 'active' : ''}
                 onClick={() => navigate(p.id)}
               >
-                <p.icon size={17} />
-                <span>{p.label}</span>
+                <p.icon size={16} />
+                <span>{p.name}</span>
               </button>
             ))}
           </nav>
           <button
-            className="icon-button"
-            aria-label="使用說明"
+            className="icon-button privacy-button"
+            aria-label="資料與隱私說明"
             onClick={() => setDialog({ type: 'help' })}
           >
-            <CircleHelp size={20} />
+            <ShieldCheck size={20} />
           </button>
         </div>
       </header>
       <main>
-        {storageError && (
+        {error && (
           <div className="warning-banner" role="alert">
-            <ShieldCheck size={20} />
-            <span>{storageError}</span>
+            <ShieldCheck size={18} />
+            <span>{error}</span>
           </div>
         )}
-        <div className="page-heading">
+        <div className={`page-heading ${page === 'home' ? 'home-heading' : ''}`}>
           <div>
-            <span className="eyebrow">A LITTLE SAVING, A LITTLE CLOSER</span>
+            <span className="eyebrow">
+              {page === 'home' ? '好好生活，也好好存錢' : pages.find((p) => p.id === page)?.name}
+            </span>
             <h1>
-              {page === 'home' ? '把喜歡的未來，一點一點存下來。' : '每一個目標，都值得慢慢實現。'}
+              {
+                {
+                  home: '把夢想，一點一點存下來。',
+                  deposits: '每一筆累積，都有它的故事。',
+                  accounts: '讓每筆錢，都有自己的位置。',
+                  records: '把日常記下來，收支就清楚了。',
+                  goals: '為喜歡的未來，設定一個目標。',
+                }[page]
+              }
             </h1>
             <p>
               {page === 'home'
-                ? '不用急著到終點，先看見自己正在前進。'
-                : '為心中的期待，留一個專屬的儲蓄空間。'}
+                ? '用自己的步調，慢慢靠近想要的生活。'
+                : '所有金額依你的實際帳戶與紀錄計算，資料保存在此瀏覽器。'}
             </p>
           </div>
-          {page === 'goals' && (
-            <button
-              className="button primary"
-              onClick={() => setDialog({ type: 'goal' })}
-              disabled={!!loaded.error}
-            >
-              <Plus size={17} />
-              新增目標
-            </button>
-          )}
+          <button
+            className="button primary"
+            disabled={!!loaded.error}
+            onClick={() =>
+              setDialog(
+                page === 'accounts'
+                  ? { type: 'account' }
+                  : page === 'goals'
+                    ? { type: 'goal' }
+                    : page === 'deposits'
+                      ? { type: 'record', deposit: true, goalId: primary?.id }
+                      : { type: 'record' },
+              )
+            }
+          >
+            <Plus size={17} />
+            {page === 'accounts'
+              ? '新增帳戶'
+              : page === 'goals'
+                ? '新增目標'
+                : page === 'deposits'
+                  ? '新增存款'
+                  : '記一筆'}
+          </button>
         </div>
-        {page === 'home' ? (
+        {page === 'home' && (
           <>
-            <div className="home-layout">
-              <div className="main-goal">
-                <div className="goal-section-header">
+            <div className="overview-grid">
+              {[
+                ['目前總資產', total.assets, Wallet],
+                ['本月收入', monthly.income, ArrowDownLeft],
+                ['本月支出', monthly.expense, ArrowUpRight],
+                ['本月結餘', monthly.surplus, Landmark],
+              ].map(([label, value, Icon]) => {
+                const I = Icon as typeof Wallet
+                return (
+                  <section className="metric-card" key={String(label)}>
+                    <div>
+                      <span>{String(label)}</span>
+                      <I size={18} />
+                    </div>
+                    <strong>{money(Number(value))}</strong>
+                    <small>
+                      {label === '目前總資產'
+                        ? '資產帳戶餘額合計'
+                        : `${today().slice(0, 7).replace('-', ' 年 ')} 月實際紀錄`}
+                    </small>
+                  </section>
+                )
+              })}
+            </div>
+            <div className="dashboard-layout">
+              <div className="saving-zone">
+                <div className="section-heading">
                   <h2>我的儲蓄目標</h2>
-                  {data.goals.length > 1 && (
+                  {book.goals.length > 1 && (
                     <select
-                      className="quest-select"
-                      aria-label="選擇主要目標"
+                      className="goal-select"
+                      aria-label="選擇儲蓄目標"
                       value={primary?.id}
                       onChange={(e) => setSelected(e.target.value)}
                     >
-                      {data.goals.map((g) => (
-                        <option key={g.id} value={g.id}>
+                      {book.goals.map((g) => (
+                        <option value={g.id} key={g.id}>
                           {g.name}
                         </option>
                       ))}
@@ -289,207 +540,498 @@ export default function App() {
                   </button>
                 </div>
                 {primary ? (
-                  renderGoal(primary, true)
+                  savingCard(primary, true)
                 ) : (
                   <div className="card empty-goal">
-                    <PiggyBank size={64} strokeWidth={1.2} />
-                    <h2>為下一個期待，存一點。</h2>
-                    <p>新增第一個目標，開始看見自己的累積。</p>
-                    <button
-                      className="button primary"
-                      disabled={!!loaded.error}
-                      onClick={() => setDialog({ type: 'goal' })}
-                    >
-                      <Plus size={17} />
+                    <PiggyBank size={65} />
+                    <h2>從第一個儲蓄目標開始。</h2>
+                    <button className="button primary" onClick={() => setDialog({ type: 'goal' })}>
                       新增目標
                     </button>
                   </div>
                 )}
+                <section className="card deposit-preview-card">
+                  <div className="section-heading">
+                    <h2>存錢明細</h2>
+                    <button className="text-button" onClick={() => navigate('deposits')}>
+                      全部明細
+                      <ArrowUpRight size={15} />
+                    </button>
+                  </div>
+                  {recordList(
+                    sorted(
+                      allDeposits
+                        .filter((x) => !primary || x.record.goalId === primary.id)
+                        .map((x) => x.record),
+                    ).slice(0, 4),
+                    true,
+                  )}
+                </section>
               </div>
-              <aside className="savings-aside">
-                <section className="quiet-note">
-                  <span className="aside-icon">
-                    <Heart size={23} strokeWidth={1.5} />
-                  </span>
-                  <span className="eyebrow">AT YOUR OWN PACE</span>
-                  <h2>
-                    小小的前進，
+              <aside className="dashboard-aside">
+                <section className="card life-card">
+                  <div className="section-heading">
+                    <span className="life-symbol">
+                      <Mountain size={25} />
+                      <Flag size={13} />
+                    </span>
+                    <button
+                      className="icon-button"
+                      aria-label="編輯30歲目標"
+                      onClick={() => setDialog({ type: 'life' })}
+                    >
+                      <MoreHorizontal size={20} />
+                    </button>
+                  </div>
+                  <span className="eyebrow">給未來的自己</span>
+                  <h2>30歲目標</h2>
+                  <p className="life-description">
+                    {book.life.targetAge}歲前達成年收入
                     <br />
-                    也值得為自己開心。
-                  </h2>
-                  <p>
-                    目標可以很大，
-                    <br />
-                    今天只要存下一點點就好。
+                    <b>{money(book.life.targetIncome)}</b>
                   </p>
-                  <span className="note-line" />
+                  <label className="year-select">
+                    收入年度
+                    <input
+                      aria-label="收入年度"
+                      type="number"
+                      min="1900"
+                      max="9999"
+                      defaultValue={year}
+                      onBlur={(e) => {
+                        const value = Number(e.currentTarget.value)
+                        if (!Number.isInteger(value) || value < 1900 || value > 9999)
+                          e.currentTarget.value = String(year)
+                      }}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (n >= 1900 && n <= 9999) setYear(n)
+                      }}
+                    />
+                  </label>
+                  <div className="life-income">
+                    <span>目前實際年收入</span>
+                    <strong>{money(annual)}</strong>
+                  </div>
+                  <div className="life-progress">
+                    <span>已達成 {Math.floor(lifePercent)}%</span>
+                    <span>目標 {money(book.life.targetIncome)}</span>
+                  </div>
+                  <div className="progress-track">
+                    <i style={{ width: `${lifePercent}%` }} />
+                  </div>
+                  <p className="life-remaining">
+                    距離目標還差 <b>{money(Math.max(0, book.life.targetIncome - annual))}</b>
+                  </p>
+                  {book.life.deadline && (
+                    <p className="small muted">
+                      截止日期：{book.life.deadline.replaceAll('-', '/')}
+                    </p>
+                  )}
+                  <button
+                    className="button secondary"
+                    onClick={() => setDialog({ type: 'record', initialType: 'income' })}
+                  >
+                    <Plus size={15} />
+                    紀錄一筆收入
+                  </button>
+                  <small className="life-note">依所選年度的收入紀錄加總，轉帳不計入年收入。</small>
+                </section>
+                <section className="card mini-accounts">
+                  <div className="section-heading">
+                    <h2>帳戶總覽</h2>
+                    <button className="text-button" onClick={() => navigate('accounts')}>
+                      管理
+                      <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                  {book.accounts.slice(0, 4).map((a) => (
+                    <button
+                      className="account-row"
+                      key={a.id}
+                      onClick={() => setDialog({ type: 'account', account: a })}
+                    >
+                      <span className="account-symbol">
+                        <Landmark size={17} />
+                      </span>
+                      <span>
+                        <b>{a.name}</b>
+                        <small>{a.kind === 'asset' ? '資產' : '負債'}</small>
+                      </span>
+                      <strong>{money(b.get(a.id) ?? 0)}</strong>
+                    </button>
+                  ))}
                 </section>
                 <button
                   className="completion-card"
                   aria-label="查看完成紀錄"
                   onClick={() => setDialog({ type: 'history' })}
                 >
-                  <span className="history-medal">
-                    <Trophy size={25} strokeWidth={1.6} />
+                  <Trophy size={24} />
+                  <span>
+                    <b>值得記住的每一次達成</b>
+                    <small>已完成 {completed.length} 個儲蓄目標</small>
                   </span>
-                  <div>
-                    <span className="eyebrow">LITTLE MOMENTS, BIG WINS</span>
-                    <h3>值得記住的每一次達成</h3>
-                    <p>
-                      {completed.length
-                        ? `已完成 ${completed.length} 個儲蓄目標`
-                        : '第一份完成紀錄，正在等你。'}
-                    </p>
-                  </div>
                   <ArrowUpRight size={17} />
                 </button>
-                <p className="local-note">
-                  <ShieldCheck size={14} />
-                  進度自動保存在這個瀏覽器。
-                </p>
               </aside>
             </div>
+            <section className="card recent-card">
+              <div className="section-heading">
+                <h2>最近收支紀錄</h2>
+                <button className="text-button" onClick={() => navigate('records')}>
+                  全部紀錄
+                  <ArrowUpRight size={15} />
+                </button>
+              </div>
+              {recordList(sorted(book.records).slice(0, 5))}
+            </section>
           </>
-        ) : (
+        )}
+        {page === 'deposits' && (
           <>
-            <div className="goals-summary">
-              <span>{data.goals.length} 個儲蓄目標</span>
-              <button className="text-button" onClick={() => setDialog({ type: 'history' })}>
-                <Trophy size={16} />
-                完成紀錄・{completed.length}
+            <div className="filter-bar">
+              <label>
+                月份
+                <input
+                  aria-label="存款月份"
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              </label>
+              <button className="text-button" onClick={() => setMonth('')}>
+                全部月份
               </button>
+              <button className="button secondary" onClick={() => setDescending((v) => !v)}>
+                日期{descending ? '由新到舊' : '由舊到新'}
+              </button>
+              <div>
+                <span>{month ? '所選月份存款' : '全部存款'}</span>
+                <b>{money(monthDeposits)}</b>
+              </div>
+              <div>
+                <span>累積存款紀錄總額</span>
+                <b>{money(depositTotal)}</b>
+              </div>
             </div>
-            <div className="goals-grid">{data.goals.map((g) => renderGoal(g))}</div>
-            {!data.goals.length && <Empty>從一個小目標開始，為未來留一點期待。</Empty>}
-            <p className="footnote">每個目標分別記錄已存金額，同一筆存款請勿重複填入。</p>
+            <section className="card table-card">
+              {recordList(sorted(filteredDeposits.map((x) => x.record)), true)}
+            </section>
+            <p className="footnote">
+              累積存款紀錄總額是已記錄存入金額的加總；每筆「存款後累積金額」依帳戶期初與所有有日期的收支重算，可能受支出及對帳調整影響。未記錄的舊版存款保留為帳戶餘額，不會捏造明細。
+            </p>
+          </>
+        )}
+        {page === 'records' && (
+          <>
+            <div className="filter-bar">
+              <label>
+                月份
+                <input
+                  aria-label="收支月份"
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              </label>
+              <button className="text-button" onClick={() => setMonth('')}>
+                全部月份
+              </button>
+              <button className="button secondary" onClick={() => setDescending((v) => !v)}>
+                日期{descending ? '由新到舊' : '由舊到新'}
+              </button>
+              <button
+                className="button secondary"
+                onClick={() => setDialog({ type: 'categories' })}
+              >
+                <Tags size={16} />
+                管理類別
+              </button>
+              <div>
+                <span>收入</span>
+                <b>{money(periodStats(book, month).income)}</b>
+              </div>
+              <div>
+                <span>支出</span>
+                <b>{money(periodStats(book, month).expense)}</b>
+              </div>
+            </div>
+            <section className="card table-card">
+              {recordList(sorted(book.records.filter((r) => !month || r.date.startsWith(month))))}
+            </section>
+            <p className="footnote">
+              存款與一般收支共用同一筆紀錄。帳戶轉帳與信用卡還款不計入收入或支出。刪除、編輯會自動更新相關餘額。
+            </p>
+          </>
+        )}
+        {page === 'accounts' && (
+          <>
+            <div className="account-total">
+              <span>
+                總資產 <b>{money(total.assets)}</b>
+              </span>
+              <span>
+                總負債 <b>{money(total.debt)}</b>
+              </span>
+              <span>
+                淨資產 <b>{money(total.net)}</b>
+              </span>
+            </div>
+            <div className="accounts-grid">
+              {book.accounts.map((a) => (
+                <section className="card account-card" key={a.id}>
+                  <div className="section-heading">
+                    <span className="account-symbol">
+                      <Landmark size={22} />
+                    </span>
+                    <span className="record-tag">
+                      {a.kind === 'asset' ? '資產' : '負債／信用卡'}
+                    </span>
+                  </div>
+                  <h2>{a.name}</h2>
+                  <strong>{money(b.get(a.id) ?? 0)}</strong>
+                  <div className="account-actions">
+                    <button
+                      className="text-button"
+                      onClick={() => setDialog({ type: 'account', account: a })}
+                    >
+                      編輯帳戶
+                      <ArrowUpRight size={15} />
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      aria-label={`刪除${a.name}`}
+                      onClick={() =>
+                        confirm(
+                          '刪除帳戶？',
+                          '帳戶餘額會被移除。已關聯紀錄或儲蓄目標的帳戶，必須先解除關聯。',
+                          () => commit(removeAccount(book, a.id)),
+                        )
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
+            <p className="footnote">
+              原有餘額請透過「編輯帳戶」設定，不會列為本月收入。新的薪資與支出請使用收支紀錄；帳戶間移動請用轉帳。
+            </p>
+          </>
+        )}
+        {page === 'goals' && (
+          <>
+            <div className="goals-grid">{book.goals.map((g) => savingCard(g))}</div>
+            {!book.goals.length && <Empty>新增一個儲蓄目標，從今天開始累積。</Empty>}
           </>
         )}
         <footer>
           <span>
-            <PiggyBank size={16} /> my savings<span>·</span>把日子，存成喜歡的樣子。
+            <PiggyBank size={16} />
+            我的理財手帳 · 好好生活，慢慢存錢。
           </span>
-          <span>不跟別人比，用自己的步調前進。</span>
+          <button className="text-button" onClick={() => setDialog({ type: 'help' })}>
+            <ShieldCheck size={13} />
+            資料儲存在此瀏覽器
+          </button>
         </footer>
       </main>
       {dialog && (
         <Modal
           title={
-            dialog.type === 'goal'
-              ? dialog.goal
-                ? '調整我的目標'
-                : '開啟新的目標'
-              : dialog.type === 'deposit'
-                ? '今天，也往前一步'
-                : dialog.type === 'delete'
-                  ? '確定放下這個目標？'
-                  : dialog.type === 'history'
-                    ? '我的成就收藏'
-                    : dialog.type === 'help'
-                      ? '關於我的儲蓄目標'
-                      : '使用說明'
+            dialog.type === 'record'
+              ? dialog.record
+                ? '編輯紀錄'
+                : dialog.deposit
+                  ? '新增存款'
+                  : '記錄一筆日常'
+              : dialog.type === 'account'
+                ? dialog.account
+                  ? '編輯帳戶'
+                  : '新增帳戶'
+                : dialog.type === 'goal'
+                  ? dialog.goal
+                    ? '編輯儲蓄目標'
+                    : '新增儲蓄目標'
+                  : dialog.type === 'life'
+                    ? '設定30歲人生目標'
+                    : dialog.type === 'history'
+                      ? '我的完成紀錄'
+                      : dialog.type === 'help'
+                        ? '資料與隱私說明'
+                        : dialog.type === 'categories'
+                          ? '收入與支出類別'
+                          : dialog.type === 'category'
+                            ? dialog.category
+                              ? '編輯類別'
+                              : '新增類別'
+                            : dialog.title
           }
-          close={closeDialog}
+          close={close}
         >
-          {dialog.type === 'goal' ? (
-            <GoalForm
-              goal={dialog.goal}
-              close={closeDialog}
-              onSave={(goal) => {
-                commit({
-                  ...data,
-                  goals: data.goals.some((g) => g.id === goal.id)
-                    ? data.goals.map((g) => (g.id === goal.id ? goal : g))
-                    : [...data.goals, goal],
-                })
-                setNotice('目標已儲存，一起慢慢前進。')
+          {dialog.type === 'record' ? (
+            <RecordForm
+              book={book}
+              record={dialog.record}
+              deposit={dialog.deposit}
+              goalId={dialog.goalId}
+              initialType={dialog.initialType}
+              close={close}
+              onSave={(r) => {
+                commit(replaceRecord(book, dialog.record?.id ?? null, r), true)
+                setNotice(
+                  r.goalId
+                    ? '又更接近目標了！帳戶與存款進度已同步更新。'
+                    : '紀錄已儲存，帳戶餘額已更新。',
+                )
               }}
             />
-          ) : dialog.type === 'deposit' ? (
-            <DepositForm
-              goal={dialog.goal}
-              close={closeDialog}
-              onSave={(saved) => {
-                commit({
-                  ...data,
-                  goals: data.goals.map((g) => (g.id === dialog.goal.id ? { ...g, saved } : g)),
-                })
-                setNotice('存下的不只是錢，還有未來的選擇。')
+          ) : dialog.type === 'account' ? (
+            <AccountForm
+              book={book}
+              account={dialog.account}
+              close={close}
+              onSave={(a) => {
+                commit(saveAccount(book, a))
+                setNotice('帳戶已儲存。')
               }}
             />
-          ) : dialog.type === 'delete' ? (
-            <>
-              <p className="confirm-body">
-                「{dialog.goal.name}
-                」與它的完成紀錄將被移除，不會操作你的實際存款。其他目標不受影響。
+          ) : dialog.type === 'goal' ? (
+            <SavingForm
+              book={book}
+              goal={dialog.goal}
+              close={close}
+              onSave={(g) => {
+                commit(saveGoal(book, g))
+                setNotice('目標已儲存，進度依指定帳戶餘額計算。')
+              }}
+            />
+          ) : dialog.type === 'life' ? (
+            <LifeForm book={book} close={close} onSave={(life) => commit({ ...book, life })} />
+          ) : dialog.type === 'history' ? (
+            <div className="history-list">
+              {completed.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => {
+                    close()
+                    setCelebrations([g])
+                  }}
+                >
+                  <span className="history-medal">
+                    <Trophy size={22} />
+                  </span>
+                  <span>
+                    <b>{g.name}</b>
+                    <small>
+                      {g.completedAt} · {money(g.completedAmount ?? 0)}
+                    </small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+              ))}
+              {!completed.length && <Empty>目標達成後，完成日期與金額會保留在這裡。</Empty>}
+            </div>
+          ) : dialog.type === 'help' ? (
+            <div className="help-content">
+              <p>
+                目前沒有登入驗證、後端或雲端資料庫。GitHub Pages
+                只提供公開網頁，無法提供私人資料庫或登入保護。
               </p>
+              <p>
+                你的帳戶、存款與收支只保存在目前瀏覽器的本機儲存，沒有上傳
+                GitHub。重新整理會保留；換瀏覽器、裝置、網址或清除網站資料後，不會自動同步或還原。
+              </p>
+              <p>
+                本機資料未加密，任何能使用同一瀏覽器的人可能讀到資料。請在可信任的個人裝置使用。本版本沒有偽裝成安全登入的前端密碼鎖。
+              </p>
+              <p>
+                舊版原始資料仍保留；轉換後使用新版帳簿。來源帳戶對帳餘額不是收入，轉帳不增加總資產。
+              </p>
+            </div>
+          ) : dialog.type === 'categories' ? (
+            <div className="categories-list">
+              <button className="button primary" onClick={() => setDialog({ type: 'category' })}>
+                <Plus size={16} />
+                新增類別
+              </button>
+              {book.categories.map((c) => (
+                <div key={c.id}>
+                  <span>
+                    {c.name}
+                    <small>{c.type === 'income' ? '收入' : '支出'}</small>
+                  </span>
+                  <button
+                    className="icon-button"
+                    aria-label={`編輯類別${c.name}`}
+                    onClick={() => setDialog({ type: 'category', category: c })}
+                  >
+                    <Settings2 size={16} />
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    aria-label={`刪除類別${c.name}`}
+                    onClick={() =>
+                      confirm(
+                        '刪除類別？',
+                        '已被紀錄使用的類別無法刪除，請先調整相關紀錄。',
+                        () => {
+                          if (book.records.some((r) => r.categoryId === c.id))
+                            throw new Error('此類別仍有紀錄，請先修改相關紀錄。')
+                          commit({
+                            ...book,
+                            categories: book.categories.filter((x) => x.id !== c.id),
+                          })
+                        },
+                      )
+                    }
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : dialog.type === 'category' ? (
+            <CategoryForm
+              category={dialog.category}
+              close={close}
+              onSave={(category) =>
+                commit({
+                  ...book,
+                  categories: dialog.category
+                    ? book.categories.map((c) => (c.id === category.id ? category : c))
+                    : [...book.categories, category],
+                })
+              }
+            />
+          ) : dialog.type === 'confirm' ? (
+            <>
+              <p className="confirm-body">{dialog.message}</p>
               <div className="form-actions">
-                <button className="button secondary" onClick={closeDialog}>
-                  繼續保留
+                <button className="button secondary" onClick={close}>
+                  取消
                 </button>
                 <button
                   className="button danger-button"
                   onClick={() => {
                     try {
-                      commit({ ...data, goals: data.goals.filter((g) => g.id !== dialog.goal.id) })
-                      closeDialog()
-                      setNotice('目標已移除，隨時可以重新出發。')
+                      dialog.run()
+                      close()
                     } catch (e) {
-                      setNotice(e instanceof Error ? e.message : '無法儲存')
+                      setNotice(e instanceof Error ? e.message : '操作失敗')
                     }
                   }}
                 >
-                  刪除目標
+                  確認操作
                 </button>
               </div>
             </>
-          ) : dialog.type === 'history' ? (
-            <div className="history-list">
-              {completed.length ? (
-                completed.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => {
-                      closeDialog()
-                      setCelebrations([g])
-                    }}
-                  >
-                    <span className="history-medal">
-                      <Trophy size={22} />
-                    </span>
-                    <span>
-                      <b>{g.name}</b>
-                      <small>
-                        {g.completedAt} · {money(g.completedAmount ?? 0)}
-                      </small>
-                    </span>
-                    <ChevronRight size={18} />
-                  </button>
-                ))
-              ) : (
-                <div className="history-empty">
-                  <span className="history-medal">
-                    <Trophy size={36} />
-                  </span>
-                  <h3>第一枚成就，留給努力的你。</h3>
-                  <p>目標達成 100% 後，完成日期與金額會收藏在這裡。</p>
-                </div>
-              )}
-            </div>
-          ) : dialog.type === 'help' ? (
-            <div className="help-content">
-              <p>設定夢想、填入目前已存金額，再用「存一筆」記下新的累積。</p>
-              <p>
-                圓環顯示已存金額占目標的比例。超過 80% 時會提醒你快達標，首次達成 100%
-                時會記下完成日期與金額，並顯示簡單慶祝。
-              </p>
-              <p>
-                資料自動保存在這個瀏覽器，沒有後端或跨裝置同步。清除網站資料、更換瀏覽器或網址可能使進度無法讀取。
-              </p>
-            </div>
           ) : null}
         </Modal>
       )}
-      {celebrations.length > 0 && !dialog && (
+      {!!celebrations.length && !dialog && (
         <Modal title="一個目標，完成了！" close={closeCelebration}>
           <div className="celebration">
             <div className="confetti" aria-hidden="true">
@@ -498,17 +1040,16 @@ export default function App() {
                   key={i}
                   style={{
                     left: `${(i * 37) % 100}%`,
-                    animationDelay: `${(i % 8) * 0.12}s`,
-                    background: ['#a4bd8a', '#dfb96c', '#cadbb6', '#eed39b'][i % 4],
+                    animationDelay: `${(i % 6) * 0.12}s`,
+                    background: ['#9bbf9a', '#e3c777', '#f0bacb'][i % 3],
                   }}
                 />
               ))}
             </div>
             <span className="trophy-orb">
-              <Trophy size={55} />
-              <Sparkles className="trophy-spark" size={25} />
+              <Trophy size={52} />
+              <Sparkles className="trophy-spark" size={23} />
             </span>
-            <span className="eyebrow">DREAM ACHIEVED</span>
             <h2>恭喜！儲蓄目標達成！</h2>
             <p>{celebrations[0].name}</p>
             <strong>{money(celebrations[0].completedAmount ?? 0)}</strong>
@@ -516,10 +1057,10 @@ export default function App() {
               <CheckCheck size={16} />
               完成日期 {celebrations[0].completedAt}
             </span>
-            <p className="small muted">每一筆小小的累積，終於成為一件大大的事。</p>
+            <p className="small muted">每一次認真累積，都值得為自己開心。</p>
             <button className="button primary" onClick={closeCelebration}>
               收藏這份成就
-              <Heart size={16} />
+              <Check size={16} />
             </button>
           </div>
         </Modal>
@@ -536,13 +1077,13 @@ export default function App() {
     </div>
   )
 }
-function DepositForm({
-  goal,
+function CategoryForm({
+  category,
   onSave,
   close,
 }: {
-  goal: Quest
-  onSave: (saved: number) => void
+  category?: Category
+  onSave: (c: Category) => void
   close: () => void
 }) {
   const [error, setError] = useState('')
@@ -550,30 +1091,24 @@ function DepositForm({
     <form
       onSubmit={(e) => {
         e.preventDefault()
-        const amount = Number(new FormData(e.currentTarget).get('amount'))
-        if (!Number.isInteger(amount) || amount <= 0 || goal.saved + amount > 1e12) {
-          setError('請輸入正整數，累積金額不可超過一兆元。')
-          return
-        }
+        const v = Object.fromEntries(new FormData(e.currentTarget))
         try {
-          onSave(goal.saved + amount)
+          onSave(categorySchema.parse({ id: category?.id ?? uid(), name: v.name, type: v.type }))
           close()
         } catch (e) {
-          setError(e instanceof Error ? e.message : '無法儲存')
+          setError(e instanceof Error ? e.message : '請檢查輸入')
         }
       }}
     >
-      <div className="deposit-preview">
-        <span>{goal.name}</span>
-        <strong>{money(goal.saved)}</strong>
-        <small>目前已存金額</small>
-      </div>
-      <Field label="這次存入（NT$）">
-        <MoneyInput name="amount" min={1} />
+      <Field label="類別名稱">
+        <input name="name" maxLength={80} defaultValue={category?.name} required />
       </Field>
-      <p className="info">
-        只是記錄這次的儲蓄，不會操作實際存款。若要直接修改累積總額，請使用目標右上角的編輯按鈕。
-      </p>
+      <Field label="類別用途">
+        <select name="type" defaultValue={category?.type ?? 'expense'}>
+          <option value="income">收入</option>
+          <option value="expense">支出</option>
+        </select>
+      </Field>
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -584,8 +1119,7 @@ function DepositForm({
           取消
         </button>
         <button className="button primary" type="submit">
-          儲存這一步
-          <ArrowRight size={16} />
+          儲存類別
         </button>
       </div>
     </form>
