@@ -42,7 +42,7 @@ test('轉帳存款同步明細、帳戶與圓環，總資產和收入不變', as
   await deposit(page, '2000')
   await expect(page.getByRole('img', { name: '完成 5%' })).toBeVisible()
   await expect(page.getByTestId('animated-percent')).toHaveText('5%')
-  await expect(page.locator('.falling-coins svg')).toHaveCount(3)
+  await expect(page.locator('.falling-coins svg')).toHaveCount(1)
   await expect(page.locator('.pig-scene')).toHaveClass(/deposit-active/)
   await expect(page.locator('.progress-message')).toContainText('又更接近目標了！')
   const b = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
@@ -139,7 +139,7 @@ test('首次達標金幣與慶祝只播放一次，重開不播放，完成紀�
   await page.getByRole('button', { name: '查看完成紀錄', exact: true }).click()
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: /郵局儲蓄目標/ })
+    .getByRole('button', { name: /年底郵局儲蓄/ })
     .click()
   await expect(
     page.getByRole('heading', { name: '恭喜！儲蓄目標達成！', exact: true }),
@@ -187,7 +187,7 @@ test('儲蓄目標可管理且依指定帳戶餘額，刪除目標不刪存款',
   await expect(page.getByRole('img', { name: '完成 72%' })).toBeVisible()
   const main = page
     .locator('article')
-    .filter({ has: page.getByRole('heading', { name: '郵局儲蓄目標' }) })
+    .filter({ has: page.getByRole('heading', { name: '年底郵局儲蓄' }) })
   await main.getByRole('button', { name: '刪除目標', exact: true }).click()
   await page.getByRole('button', { name: '確認操作' }).click()
   const b = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
@@ -392,4 +392,91 @@ test('一般轉帳自動連結唯一儲蓄目標，共用一筆存款與收支�
   expect(data.records).toHaveLength(1)
   expect(data.records[0].goalId).toBe('post-goal')
   await expect(page.locator('.metric-card').filter({ hasText: '本月收入' })).toContainText('NT$0')
+})
+
+test('導覽順序、單枚金幣、80%提示與來源帳戶符合整合需求', async ({ page }) => {
+  await expect(page.getByRole('navigation').getByRole('button')).toHaveText([
+    '首頁',
+    '收支紀錄',
+    '存錢明細',
+    '儲蓄目標',
+    '帳戶總覽',
+  ])
+  await fund(page, 30000)
+  await deposit(page, '2000', '接近目標')
+  await expect(page.getByTestId('animated-percent')).toHaveText('80%')
+  await expect(page.locator('.progress-message')).toHaveText('快達標了！')
+  await page.getByRole('navigation').getByRole('button', { name: '存錢明細', exact: true }).click()
+  await expect(page.getByRole('columnheader', { name: '來源帳戶', exact: true })).toBeVisible()
+  await expect(page.locator('tbody .deposit-source')).toHaveText('銀行')
+})
+
+test('存款與收支可查詢日期區間，不改動每月統計或紀錄', async ({ page }) => {
+  await fund(page)
+  await deposit(page, '2000', '月初存款', '2026-10-01')
+  await deposit(page, '3000', '月底存款', '2026-10-24')
+  await page.getByRole('navigation').getByRole('button', { name: '存錢明細', exact: true }).click()
+  await page.getByLabel('存款起始日期').fill('2026-10-20')
+  await page.getByLabel('存款結束日期').fill('2026-10-25')
+  await expect(page.locator('tbody tr')).toHaveCount(1)
+  await expect(page.locator('tbody')).toContainText('月底存款')
+  await expect(page.locator('.date-query-total')).toContainText('NT$3,000')
+  await expect(page.locator('.filter-bar')).toContainText('NT$5,000')
+  await page.getByRole('navigation').getByRole('button', { name: '收支紀錄', exact: true }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(1)
+  await page.getByRole('button', { name: '清除篩選', exact: true }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(2)
+})
+
+test('封存與還原保留明細及餘額，首頁不再顯示封存目標', async ({ page }) => {
+  await fund(page)
+  await deposit(page, '2000', '保留存款')
+  await page.getByRole('navigation').getByRole('button', { name: '儲蓄目標', exact: true }).click()
+  await page.getByRole('button', { name: '封存年底郵局儲蓄', exact: true }).click()
+  await expect(page.locator('.goals-grid article')).toHaveCount(0)
+  await page.getByRole('button', { name: '查看已封存目標', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '年底郵局儲蓄', exact: true })).toBeVisible()
+  await expect(
+    page.locator('article').getByRole('button', { name: '新增存款', exact: true }),
+  ).toBeDisabled()
+  await page.getByRole('button', { name: '編輯年底郵局儲蓄', exact: true }).click()
+  await page.getByLabel('目標名稱').fill('已封存的郵局目標')
+  await page.getByRole('button', { name: '儲存目標', exact: true }).click()
+  await page.getByRole('navigation').getByRole('button', { name: '首頁', exact: true }).click()
+  await expect(page.locator('.saving-zone article')).toHaveCount(0)
+  const data = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
+  expect(data.records).toHaveLength(1)
+  expect(data.goals[0].archived).toBe(true)
+  await page.getByRole('navigation').getByRole('button', { name: '儲蓄目標', exact: true }).click()
+  await page.getByRole('button', { name: '還原已封存的郵局目標', exact: true }).click()
+  await page.getByRole('button', { name: '查看進行中目標', exact: true }).click()
+  await expect(page.getByRole('img', { name: '完成 5%' })).toBeVisible()
+})
+
+test('首頁下方及目標頁可管理獨立人生目標，不混入存款', async ({ page }) => {
+  const savingsBottom = await page
+    .locator('.dashboard-layout')
+    .evaluate((el) => el.getBoundingClientRect().bottom)
+  const lifeTop = await page
+    .locator('.life-section')
+    .evaluate((el) => el.getBoundingClientRect().top)
+  expect(lifeTop).toBeGreaterThan(savingsBottom)
+  await page.getByRole('navigation').getByRole('button', { name: '儲蓄目標', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '長期人生目標', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '新增人生目標', exact: true }).click()
+  await page.getByLabel('人生目標名稱').fill('35歲年收入目標')
+  await page.getByLabel('目標年齡').fill('35')
+  await page.getByLabel('目標年收入（NT$）').fill('1500000')
+  await page.getByRole('button', { name: '儲存人生目標', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '35歲年收入目標', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '編輯35歲年收入目標', exact: true }).click()
+  await page.getByLabel('目標年收入（NT$）').fill('1800000')
+  await page.getByRole('button', { name: '儲存人生目標', exact: true }).click()
+  await page.reload()
+  await page.getByRole('navigation').getByRole('button', { name: '儲蓄目標', exact: true }).click()
+  const data = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
+  expect(data.life.targetIncome).toBe(1000000)
+  expect(data.lifeGoals[0].targetIncome).toBe(1800000)
+  expect(data.goals[0].target).toBe(40000)
+  expect(data.records).toHaveLength(0)
 })

@@ -53,6 +53,7 @@ export const savingGoalSchema = z
     accountId: text,
     completedAt: dateSchema.optional(),
     completedAmount: amount.optional(),
+    archived: z.boolean().optional(),
   })
   .strict()
   .refine((g) => !!g.completedAt === (g.completedAmount !== undefined), '完成紀錄不完整')
@@ -63,6 +64,7 @@ export const lifeSchema = z
     deadline: dateSchema.nullable(),
   })
   .strict()
+export const lifeGoalSchema = lifeSchema.extend({ id: text, name: text }).strict()
 export const bookSchema = z
   .object({
     version: z.literal(3),
@@ -71,10 +73,11 @@ export const bookSchema = z
     records: z.array(recordSchema).max(10000),
     goals: z.array(savingGoalSchema).max(200),
     life: lifeSchema,
+    lifeGoals: z.array(lifeGoalSchema).max(20).optional(),
   })
   .strict()
   .superRefine((d, c) => {
-    for (const group of [d.accounts, d.categories, d.records, d.goals])
+    for (const group of [d.accounts, d.categories, d.records, d.goals, d.lifeGoals ?? []])
       if (new Set(group.map((x) => x.id)).size !== group.length)
         c.addIssue({ code: 'custom', message: '資料識別碼重複' })
     const accounts = new Map(d.accounts.map((a) => [a.id, a])),
@@ -102,6 +105,7 @@ export type Book = z.infer<typeof bookSchema>
 export type BookAccount = z.infer<typeof bookAccountSchema>
 export type RecordItem = z.infer<typeof recordSchema>
 export type SavingGoal = z.infer<typeof savingGoalSchema>
+export type LifeGoal = z.infer<typeof lifeGoalSchema>
 export type Category = z.infer<typeof categorySchema>
 export const defaultCategories: Category[] = [
   { id: 'salary', name: '薪資', type: 'income' },
@@ -126,7 +130,7 @@ export function emptyBook(): Book {
     goals: [
       {
         id: 'post-goal',
-        name: '郵局儲蓄目標',
+        name: '年底郵局儲蓄',
         target: 40000,
         deadline: '2026-12-31',
         accountId: 'post',
@@ -190,7 +194,7 @@ export function reconcileBook(book: Book, now = today()) {
   const b = balances(book)
   const goals = book.goals.map((g) => {
     const saved = b.get(g.accountId) ?? 0
-    if (!g.completedAt && saved >= g.target) {
+    if (!g.archived && !g.completedAt && saved >= g.target) {
       const done = { ...g, completedAt: now, completedAmount: saved }
       completed.push(done)
       return done
@@ -390,3 +394,22 @@ export const newRecord = (type: RecordItem['type']): RecordItem => ({
   accountId: '',
   note: '',
 })
+
+export function archiveGoal(book: Book, id: string, archived = true) {
+  if (!book.goals.some((g) => g.id === id)) throw new Error('找不到目標')
+  return validBook({
+    ...book,
+    goals: book.goals.map((g) => (g.id === id ? { ...g, archived } : g)),
+  })
+}
+export function matchesRecordDate(
+  record: RecordItem,
+  filter: { month?: string; from?: string; to?: string },
+) {
+  if (filter.from && filter.to && filter.from > filter.to) return false
+  return (
+    (!filter.month || record.date.startsWith(filter.month)) &&
+    (!filter.from || record.date >= filter.from) &&
+    (!filter.to || record.date <= filter.to)
+  )
+}

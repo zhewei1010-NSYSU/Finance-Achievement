@@ -6,12 +6,10 @@ import {
   Check,
   CheckCheck,
   ChevronRight,
-  Flag,
   Landmark,
   LayoutDashboard,
   List,
   MoreHorizontal,
-  Mountain,
   PiggyBank,
   Plus,
   Settings2,
@@ -27,6 +25,8 @@ import {
 import { money, today, uid } from './lib/finance'
 import {
   accountTotals,
+  archiveGoal,
+  matchesRecordDate,
   annualIncome,
   balances,
   BOOK_KEY,
@@ -42,9 +42,10 @@ import {
   saveAccount,
   saveGoal,
 } from './lib/ledger'
-import type { Book, BookAccount, Category, RecordItem, SavingGoal } from './lib/ledger'
+import type { Book, BookAccount, Category, RecordItem, SavingGoal, LifeGoal } from './lib/ledger'
 import { AccountForm, LifeForm, RecordForm, SavingForm } from './components/BookForms'
 import { Empty, Field, Modal, Ring } from './components/UI'
+import LifeCard from './components/LifeCard'
 
 type Page = 'home' | 'deposits' | 'accounts' | 'records' | 'goals'
 type Dialog =
@@ -57,7 +58,7 @@ type Dialog =
     }
   | { type: 'account'; account?: BookAccount }
   | { type: 'goal'; goal?: SavingGoal }
-  | { type: 'life' }
+  | { type: 'life'; goal?: LifeGoal; create?: boolean }
   | { type: 'history' }
   | { type: 'help' }
   | { type: 'categories' }
@@ -66,10 +67,10 @@ type Dialog =
   | null
 const pages = [
   { id: 'home', name: '首頁', icon: LayoutDashboard },
-  { id: 'deposits', name: '存錢明細', icon: PiggyBank },
-  { id: 'accounts', name: '帳戶總覽', icon: Wallet },
   { id: 'records', name: '收支紀錄', icon: List },
+  { id: 'deposits', name: '存錢明細', icon: PiggyBank },
   { id: 'goals', name: '儲蓄目標', icon: Target },
+  { id: 'accounts', name: '帳戶總覽', icon: Wallet },
 ] as const
 export default function App() {
   const [loaded] = useState(loadBook),
@@ -81,6 +82,9 @@ export default function App() {
     [notice, setNotice] = useState(''),
     [error, setError] = useState(loaded.error ?? ''),
     [month, setMonth] = useState(today().slice(0, 7)),
+    [dateFrom, setDateFrom] = useState(''),
+    [dateTo, setDateTo] = useState(''),
+    [showArchived, setShowArchived] = useState(false),
     [descending, setDescending] = useState(true),
     [year, setYear] = useState(Number(today().slice(0, 4))),
     [animation, setAnimation] = useState({ id: '', key: 0, happy: false })
@@ -126,14 +130,13 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [animation.key])
   const primary =
-      book.goals.find((g) => g.id === selected) ??
-      book.goals.find((g) => !g.completedAt) ??
-      book.goals[0],
+      book.goals.find((g) => g.id === selected && !g.archived) ??
+      book.goals.find((g) => !g.archived && !g.completedAt) ??
+      book.goals.find((g) => !g.archived),
     b = balances(book),
     total = accountTotals(book),
     monthly = periodStats(book, today().slice(0, 7)),
     annual = annualIncome(book, year),
-    lifePercent = Math.min(100, (annual / book.life.targetIncome) * 100),
     completed = book.goals.filter((g) => g.completedAt)
   function commit(next: Book, animate = false) {
     if (loaded.error) throw new Error('原始資料尚未修復，已暫停編輯。')
@@ -194,9 +197,13 @@ export default function App() {
       },
     )
   const allDeposits = depositRows(book),
-    filteredDeposits = allDeposits.filter((x) => !month || x.record.date.startsWith(month)),
+    filteredDeposits = allDeposits.filter((x) =>
+      matchesRecordDate(x.record, { month, from: dateFrom, to: dateTo }),
+    ),
     depositTotal = allDeposits.reduce((s, x) => s + x.record.amount, 0),
-    monthDeposits = filteredDeposits.reduce((s, x) => s + x.record.amount, 0)
+    monthDeposits = allDeposits
+      .filter((x) => !month || x.record.date.startsWith(month))
+      .reduce((s, x) => s + x.record.amount, 0)
   const recordList = (items: RecordItem[], deposits = false) => {
     const after = new Map(allDeposits.map((x) => [x.record.id, x.after]))
     return (
@@ -206,6 +213,7 @@ export default function App() {
             <tr>
               <th>日期／備註</th>
               <th>{deposits ? '本次存入' : '類型／類別'}</th>
+              {deposits && <th>來源帳戶</th>}
               <th>{deposits ? '存入帳戶／目標' : '帳戶'}</th>
               <th className="align-right">{deposits ? '存款後累積金額' : '金額'}</th>
               <th>
@@ -236,6 +244,13 @@ export default function App() {
                     </>
                   )}
                 </td>
+                {deposits && (
+                  <td className="deposit-source">
+                    {r.type === 'income'
+                      ? '外部收入'
+                      : book.accounts.find((a) => a.id === r.accountId)?.name}
+                  </td>
+                )}
                 <td>
                   <b>
                     {
@@ -295,6 +310,7 @@ export default function App() {
       <article className={`savings-card ${large ? 'featured' : ''}`} key={g.id}>
         <div className="goal-card-header">
           <span className="goal-badge">
+            {g.archived ? '已封存 · ' : ''}
             {book.accounts.find((a) => a.id === g.accountId)?.name} ·{' '}
             {s.percent >= 100 ? '目標已達成' : '正在累積中'}
           </span>
@@ -321,10 +337,10 @@ export default function App() {
           <p className={`progress-message ${s.percent >= 100 ? 'success' : ''}`} aria-live="polite">
             {s.percent >= 100
               ? '恭喜！儲蓄目標達成！'
-              : animation.id === g.accountId && animation.key
-                ? '又更接近目標了！'
-                : s.percent > 80
-                  ? '快達標了！離目標只差一點點！'
+              : s.percent >= 80
+                ? '快達標了！'
+                : animation.id === g.accountId && animation.key
+                  ? '又更接近目標了！'
                   : '為每一次認真存錢的自己，開心一下。'}
           </p>
         </div>
@@ -359,7 +375,7 @@ export default function App() {
         <div className="goal-bottom">
           <button
             className="button primary"
-            disabled={!!loaded.error}
+            disabled={!!loaded.error || g.archived}
             onClick={() => setDialog({ type: 'record', deposit: true, goalId: g.id })}
           >
             <Plus size={17} />
@@ -372,6 +388,20 @@ export default function App() {
         </div>
         {!large && (
           <div className="quest-tools">
+            <button
+              className="text-button"
+              aria-label={`${g.archived ? '還原' : '封存'}${g.name}`}
+              onClick={() => {
+                try {
+                  commit(archiveGoal(book, g.id, !g.archived))
+                  setNotice(g.archived ? '目標已還原。' : '目標已封存，原始紀錄與帳戶餘額保留。')
+                } catch (e) {
+                  setNotice(e instanceof Error ? e.message : '無法儲存')
+                }
+              }}
+            >
+              {g.archived ? '還原目標' : '封存目標'}
+            </button>
             {g.completedAt && (
               <button className="text-button" onClick={() => setCelebrations([g])}>
                 查看完成紀錄
@@ -392,6 +422,112 @@ export default function App() {
           </div>
         )}
       </article>
+    )
+  }
+  function dateFilters(label: string) {
+    return (
+      <div className="date-query">
+        <label>
+          起始日期
+          <input
+            aria-label={`${label}起始日期`}
+            type="date"
+            value={dateFrom}
+            max={dateTo || today()}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
+        </label>
+        <label>
+          結束日期
+          <input
+            aria-label={`${label}結束日期`}
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            max={today()}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
+        </label>
+        <button
+          className="text-button"
+          onClick={() => {
+            setDateFrom('')
+            setDateTo('')
+            setMonth('')
+          }}
+        >
+          清除篩選
+        </button>
+        {dateFrom && dateTo && dateFrom > dateTo && (
+          <p className="form-error" role="alert">
+            結束日期不可早於起始日期。
+          </p>
+        )}
+        {label === '存款' && (dateFrom || dateTo) && (
+          <span className="date-query-total">
+            查詢存款合計{' '}
+            <b>{money(filteredDeposits.reduce((sum, row) => sum + row.record.amount, 0))}</b>
+          </span>
+        )}
+      </div>
+    )
+  }
+  function lifeSection(manage: boolean) {
+    return (
+      <section className="life-section">
+        <div className="section-heading">
+          <h2>長期人生目標</h2>
+          {manage ? (
+            <button
+              className="button secondary"
+              onClick={() => setDialog({ type: 'life', create: true })}
+            >
+              <Plus size={15} />
+              新增人生目標
+            </button>
+          ) : (
+            <button className="text-button" onClick={() => navigate('goals')}>
+              管理人生目標
+              <ArrowUpRight size={15} />
+            </button>
+          )}
+        </div>
+        <div className="life-goals-grid">
+          <LifeCard
+            life={book.life}
+            annual={annual}
+            year={year}
+            onYear={setYear}
+            onEdit={() => setDialog({ type: 'life' })}
+            onIncome={() => setDialog({ type: 'record', initialType: 'income' })}
+          />
+          {manage &&
+            book.lifeGoals?.map((g) => (
+              <LifeCard
+                key={g.id}
+                id={g.id}
+                name={g.name}
+                life={g}
+                annual={annual}
+                year={year}
+                onYear={setYear}
+                onEdit={() => setDialog({ type: 'life', goal: g })}
+                onIncome={() => setDialog({ type: 'record', initialType: 'income' })}
+                onDelete={() =>
+                  confirm(
+                    '刪除這個人生目標？',
+                    '只移除目標設定，年度收入紀錄與帳戶餘額會保留。',
+                    () =>
+                      commit({
+                        ...book,
+                        lifeGoals: book.lifeGoals?.filter((item) => item.id !== g.id),
+                      }),
+                  )
+                }
+              />
+            ))}
+        </div>
+      </section>
     )
   }
   return (
@@ -467,7 +603,7 @@ export default function App() {
           </div>
           <button
             className="button primary"
-            disabled={!!loaded.error}
+            disabled={!!loaded.error || (page === 'deposits' && !primary)}
             onClick={() =>
               setDialog(
                 page === 'accounts'
@@ -520,18 +656,20 @@ export default function App() {
               <div className="saving-zone">
                 <div className="section-heading">
                   <h2>我的儲蓄目標</h2>
-                  {book.goals.length > 1 && (
+                  {book.goals.filter((g) => !g.archived).length > 1 && (
                     <select
                       className="goal-select"
                       aria-label="選擇儲蓄目標"
                       value={primary?.id}
                       onChange={(e) => setSelected(e.target.value)}
                     >
-                      {book.goals.map((g) => (
-                        <option value={g.id} key={g.id}>
-                          {g.name}
-                        </option>
-                      ))}
+                      {book.goals
+                        .filter((g) => !g.archived)
+                        .map((g) => (
+                          <option value={g.id} key={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
                     </select>
                   )}
                   <button className="text-button" onClick={() => navigate('goals')}>
@@ -569,74 +707,6 @@ export default function App() {
                 </section>
               </div>
               <aside className="dashboard-aside">
-                <section className="card life-card">
-                  <div className="section-heading">
-                    <span className="life-symbol">
-                      <Mountain size={25} />
-                      <Flag size={13} />
-                    </span>
-                    <button
-                      className="icon-button"
-                      aria-label="編輯30歲目標"
-                      onClick={() => setDialog({ type: 'life' })}
-                    >
-                      <MoreHorizontal size={20} />
-                    </button>
-                  </div>
-                  <span className="eyebrow">給未來的自己</span>
-                  <h2>30歲目標</h2>
-                  <p className="life-description">
-                    {book.life.targetAge}歲前達成年收入
-                    <br />
-                    <b>{money(book.life.targetIncome)}</b>
-                  </p>
-                  <label className="year-select">
-                    收入年度
-                    <input
-                      aria-label="收入年度"
-                      type="number"
-                      min="1900"
-                      max="9999"
-                      defaultValue={year}
-                      onBlur={(e) => {
-                        const value = Number(e.currentTarget.value)
-                        if (!Number.isInteger(value) || value < 1900 || value > 9999)
-                          e.currentTarget.value = String(year)
-                      }}
-                      onChange={(e) => {
-                        const n = Number(e.target.value)
-                        if (n >= 1900 && n <= 9999) setYear(n)
-                      }}
-                    />
-                  </label>
-                  <div className="life-income">
-                    <span>目前實際年收入</span>
-                    <strong>{money(annual)}</strong>
-                  </div>
-                  <div className="life-progress">
-                    <span>已達成 {Math.floor(lifePercent)}%</span>
-                    <span>目標 {money(book.life.targetIncome)}</span>
-                  </div>
-                  <div className="progress-track">
-                    <i style={{ width: `${lifePercent}%` }} />
-                  </div>
-                  <p className="life-remaining">
-                    距離目標還差 <b>{money(Math.max(0, book.life.targetIncome - annual))}</b>
-                  </p>
-                  {book.life.deadline && (
-                    <p className="small muted">
-                      截止日期：{book.life.deadline.replaceAll('-', '/')}
-                    </p>
-                  )}
-                  <button
-                    className="button secondary"
-                    onClick={() => setDialog({ type: 'record', initialType: 'income' })}
-                  >
-                    <Plus size={15} />
-                    紀錄一筆收入
-                  </button>
-                  <small className="life-note">依所選年度的收入紀錄加總，轉帳不計入年收入。</small>
-                </section>
                 <section className="card mini-accounts">
                   <div className="section-heading">
                     <h2>帳戶總覽</h2>
@@ -676,6 +746,7 @@ export default function App() {
                 </button>
               </aside>
             </div>
+            {lifeSection(false)}
             <section className="card recent-card">
               <div className="section-heading">
                 <h2>最近收支紀錄</h2>
@@ -715,11 +786,12 @@ export default function App() {
                 <b>{money(depositTotal)}</b>
               </div>
             </div>
+            {dateFilters('存款')}
             <section className="card table-card">
               {recordList(sorted(filteredDeposits.map((x) => x.record)), true)}
             </section>
             <p className="footnote">
-              累積存款紀錄總額是已記錄存入金額的加總；每筆「存款後累積金額」依帳戶期初與所有有日期的收支重算，可能受支出及對帳調整影響。未記錄的舊版存款保留為帳戶餘額，不會捏造明細。
+              月份存款總額不受下方日期區間影響；日期查詢合計只計篩選結果。累積存款紀錄總額是已記錄存入金額的加總；每筆「存款後累積金額」依帳戶期初與所有有日期的收支重算，可能受支出及對帳調整影響。未記錄的舊版存款保留為帳戶餘額，不會捏造明細。
             </p>
           </>
         )}
@@ -749,16 +821,23 @@ export default function App() {
                 管理類別
               </button>
               <div>
-                <span>收入</span>
+                <span>{month ? '該月收入' : '全部收入'}</span>
                 <b>{money(periodStats(book, month).income)}</b>
               </div>
               <div>
-                <span>支出</span>
+                <span>{month ? '該月支出' : '全部支出'}</span>
                 <b>{money(periodStats(book, month).expense)}</b>
               </div>
             </div>
+            {dateFilters('收支')}
             <section className="card table-card">
-              {recordList(sorted(book.records.filter((r) => !month || r.date.startsWith(month))))}
+              {recordList(
+                sorted(
+                  book.records.filter((r) =>
+                    matchesRecordDate(r, { month, from: dateFrom, to: dateTo }),
+                  ),
+                ),
+              )}
             </section>
             <p className="footnote">
               存款與一般收支共用同一筆紀錄。帳戶轉帳與信用卡還款不計入收入或支出。刪除、編輯會自動更新相關餘額。
@@ -823,8 +902,24 @@ export default function App() {
         )}
         {page === 'goals' && (
           <>
-            <div className="goals-grid">{book.goals.map((g) => savingCard(g))}</div>
-            {!book.goals.length && <Empty>新增一個儲蓄目標，從今天開始累積。</Empty>}
+            <div className="goals-summary">
+              <span>
+                {book.goals.filter((g) => !g.archived).length} 個進行中目標 ·{' '}
+                {book.goals.filter((g) => g.archived).length} 個已封存
+              </span>
+              <button className="button secondary" onClick={() => setShowArchived((v) => !v)}>
+                {showArchived ? '查看進行中目標' : '查看已封存目標'}
+              </button>
+            </div>
+            <div className="goals-grid">
+              {book.goals.filter((g) => !!g.archived === showArchived).map((g) => savingCard(g))}
+            </div>
+            {!book.goals.some((g) => !!g.archived === showArchived) && (
+              <Empty>
+                {showArchived ? '目前沒有已封存目標。' : '新增一個儲蓄目標，從今天開始累積。'}
+              </Empty>
+            )}
+            {lifeSection(true)}
           </>
         )}
         <footer>
@@ -856,7 +951,9 @@ export default function App() {
                     ? '編輯儲蓄目標'
                     : '新增儲蓄目標'
                   : dialog.type === 'life'
-                    ? '設定30歲人生目標'
+                    ? dialog.create
+                      ? '新增人生目標'
+                      : '設定人生目標'
                     : dialog.type === 'history'
                       ? '我的完成紀錄'
                       : dialog.type === 'help'
@@ -909,7 +1006,34 @@ export default function App() {
               }}
             />
           ) : dialog.type === 'life' ? (
-            <LifeForm book={book} close={close} onSave={(life) => commit({ ...book, life })} />
+            <LifeForm
+              book={book}
+              life={
+                dialog.create
+                  ? { targetAge: 30, targetIncome: 1000000, deadline: null }
+                  : (dialog.goal ?? book.life)
+              }
+              goalName={dialog.create ? '' : dialog.goal?.name}
+              close={close}
+              onSave={(life, name) => {
+                if (dialog.create)
+                  commit({
+                    ...book,
+                    lifeGoals: [
+                      ...(book.lifeGoals ?? []),
+                      { ...life, id: uid(), name: name ?? '' },
+                    ],
+                  })
+                else if (dialog.goal)
+                  commit({
+                    ...book,
+                    lifeGoals: book.lifeGoals?.map((g) =>
+                      g.id === dialog.goal?.id ? { ...g, ...life, name: name ?? g.name } : g,
+                    ),
+                  })
+                else commit({ ...book, life })
+              }}
+            />
           ) : dialog.type === 'history' ? (
             <div className="history-list">
               {completed.map((g) => (

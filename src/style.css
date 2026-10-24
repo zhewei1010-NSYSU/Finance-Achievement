@@ -2331,3 +2331,118 @@ footer .text-button {
     display: none;
   }
 }
+
+/* Integration refinements reuse the existing cards, typography and colors. */
+.date-query {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 16px 19px;
+  border: 1px solid #eceff3;
+  border-radius: 11px;
+  margin-bottom: 20px;
+  background: #fff;
+}
+.date-query > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 11px;
+  color: #939ba6;
+  min-width: 0;
+  flex: 0 1 175px;
+}
+.date-query input {
+  min-height: 38px;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+.date-query > .text-button {
+  margin-bottom: 8px;
+}
+.date-query .form-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+.date-query-total {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  color: #969eaa;
+}
+.date-query-total b {
+  font-size: 18px;
+  margin-left: 8px;
+  color: #495361;
+}
+.goals-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 12px;
+  color: #929ba8;
+  padding-bottom: 19px;
+  margin-bottom: 23px;
+  border-bottom: 1px solid #eef1f5;
+}
+.life-section {
+  margin-top: 28px;
+}
+.life-section > .section-heading {
+  margin-bottom: 19px;
+}
+.life-goals-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 23px;
+  align-items: start;
+}
+.life-section .life-card {
+  grid-row: auto;
+}
+.life-delete {
+  margin-top: 15px;
+  width: 100%;
+}
+.quest-tools {
+  flex-wrap: wrap;
+}
+.deposit-source {
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .date-query {
+    padding: 15px;
+    gap: 12px;
+  }
+  .date-query > label {
+    flex: 1 1 130px;
+  }
+  .date-query-total {
+    margin: 0;
+    flex-basis: 100%;
+    font-size: 11px;
+  }
+  .goals-summary {
+    font-size: 11px;
+  }
+  .goals-summary > .button {
+    font-size: 10px;
+    min-height: 37px;
+    padding: 8px 11px;
+  }
+  .life-section {
+    margin-top: 23px;
+  }
+  .life-goals-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .life-section > .section-heading > .button {
+    font-size: 10px;
+    padding: 9px 11px;
+    min-height: 37px;
+  }
+}

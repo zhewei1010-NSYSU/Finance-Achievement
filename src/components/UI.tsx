@@ -214,7 +214,7 @@ export function Ring({
           <PinkPig />
           {animationKey > 0 && (
             <span className="falling-coins">
-              {[0, 1, 2].map((i) => (
+              {[0].map((i) => (
                 <svg key={i} viewBox="0 0 32 32" style={{ animationDelay: `${i * 0.16}s` }}>
                   <circle cx="16" cy="16" r="13" fill="#EBC873" stroke="#D6AE50" strokeWidth="2" />
                   <path

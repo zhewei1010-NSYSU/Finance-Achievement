@@ -320,3 +320,72 @@ describe('資料保留與舊帳務', () => {
     expect(() => replaceRecord(d, null, record({ date: '2026-02-30' }))).toThrow()
   })
 })
+
+describe('目標整合與舊格式相容', () => {
+  it('封存與還原不修改資產、紀錄或完成歷史', async () => {
+    const { archiveGoal } = await import('./ledger')
+    const original = replaceRecord(funded(), null, record())
+    const archived = archiveGoal(original, 'post-goal')
+    expect(archived.goals[0].archived).toBe(true)
+    expect(archived.records).toEqual(original.records)
+    expect(accountTotals(archived)).toEqual(accountTotals(original))
+    expect(balances(archiveGoal(archived, 'post-goal', false))).toEqual(balances(original))
+  })
+  it('封存目標不因帳戶後續增加而自動播放首次達標', async () => {
+    const { archiveGoal } = await import('./ledger')
+    const archived = archiveGoal(emptyBook(), 'post-goal')
+    const increased = saveAccount(archived, {
+      id: 'post',
+      name: '郵局',
+      kind: 'asset',
+      balance: 40000,
+    })
+    expect(reconcileBook(increased).completed).toHaveLength(0)
+    expect(reconcileBook(archiveGoal(increased, 'post-goal', false)).completed).toHaveLength(1)
+  })
+  it('日期區間與月份可合併查詢，邊界包含當天', async () => {
+    const { matchesRecordDate } = await import('./ledger')
+    const item = record({ date: '2026-10-24' })
+    expect(
+      matchesRecordDate(item, { month: '2026-10', from: '2026-10-24', to: '2026-10-24' }),
+    ).toBe(true)
+    expect(matchesRecordDate(item, { from: '2026-10-25' })).toBe(false)
+    expect(matchesRecordDate(item, { month: '2026-09' })).toBe(false)
+    expect(matchesRecordDate(item, { from: '2026-10-25', to: '2026-10-23' })).toBe(false)
+  })
+  it('相容沒有新欄位的v3原文，不覆寫原目標名稱或餘額', () => {
+    const old = emptyBook()
+    old.goals[0].name = '我的真實目標'
+    old.accounts[0].opening = 12345
+    localStorage.setItem(BOOK_KEY, JSON.stringify(old))
+    const loaded = loadBook()
+    expect(loaded.error).toBeUndefined()
+    expect(loaded.book.goals[0].name).toBe('我的真實目標')
+    expect(balances(loaded.book).get('post')).toBe(12345)
+    expect(loaded.book.lifeGoals).toBeUndefined()
+  })
+  it('新增多個人生目標不改寫收入、存款與總資產', () => {
+    const original = funded()
+    const next = validBook({
+      ...original,
+      lifeGoals: [
+        { id: 'life-two', name: '下一階段', targetAge: 35, targetIncome: 1500000, deadline: null },
+      ],
+    })
+    expect(next.life).toEqual(original.life)
+    expect(annualIncome(next, 2026)).toBe(annualIncome(original, 2026))
+    expect(next.goals).toEqual(original.goals)
+    expect(accountTotals(next)).toEqual(accountTotals(original))
+  })
+  it('新帳簿使用年底郵局儲蓄預設，但沒有示意資產或收入', () => {
+    const fresh = emptyBook()
+    expect(fresh.goals[0]).toMatchObject({
+      name: '年底郵局儲蓄',
+      target: 40000,
+      deadline: '2026-12-31',
+      accountId: 'post',
+    })
+    expect(accountTotals(fresh).assets).toBe(0)
+    expect(fresh.records).toEqual([])
+  })
+})

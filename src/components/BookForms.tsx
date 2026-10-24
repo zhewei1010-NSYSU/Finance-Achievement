@@ -45,13 +45,18 @@ export function RecordForm({
           ? book.accounts.some(
               (a) =>
                 a.kind === 'asset' &&
-                a.id !== book.goals.find((g) => g.id === (goalId ?? book.goals[0]?.id))?.accountId,
+                a.id !==
+                  book.goals.find(
+                    (g) => g.id === (goalId ?? book.goals.find((g) => !g.archived)?.id),
+                  )?.accountId,
             )
             ? 'transfer'
             : 'income'
           : initialType),
     ),
-    [selectedGoal, setGoal] = useState(record?.goalId ?? goalId ?? book.goals[0]?.id ?? ''),
+    [selectedGoal, setGoal] = useState(
+      record?.goalId ?? goalId ?? book.goals.find((g) => !g.archived)?.id ?? '',
+    ),
     [error, setError] = useState('')
   const goal = book.goals.find((g) => g.id === selectedGoal),
     b = balances(book),
@@ -74,7 +79,7 @@ export function RecordForm({
             recordType === 'transfer' ? destinationId : String(v.accountId ?? '')
           const matchingGoals =
             !deposit && recordType !== 'expense'
-              ? book.goals.filter((g) => g.accountId === arrivingAccount)
+              ? book.goals.filter((g) => !g.archived && g.accountId === arrivingAccount)
               : []
           const next = recordSchema.parse({
             id: record?.id ?? uid(),
@@ -125,11 +130,13 @@ export function RecordForm({
         <>
           <Field label="所屬儲蓄目標">
             <select value={selectedGoal} onChange={(e) => setGoal(e.target.value)} required>
-              {book.goals.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
+              {book.goals
+                .filter((g) => !g.archived || g.id === record?.goalId)
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
             </select>
           </Field>
           <Field label="存入帳戶">
@@ -339,6 +346,7 @@ export function SavingForm({
               ...(goal?.completedAt
                 ? { completedAt: goal.completedAt, completedAmount: goal.completedAmount }
                 : {}),
+              ...(goal?.archived !== undefined ? { archived: goal.archived } : {}),
             }),
           )
           close()
@@ -392,11 +400,15 @@ export function SavingForm({
 }
 export function LifeForm({
   book,
+  life = book.life,
+  goalName,
   onSave,
   close,
 }: {
   book: Book
-  onSave: (life: Book['life']) => void
+  life?: Book['life']
+  goalName?: string
+  onSave: (life: Book['life'], name?: string) => void
   close: () => void
 }) {
   const [error, setError] = useState('')
@@ -406,12 +418,15 @@ export function LifeForm({
         e.preventDefault()
         const v = Object.fromEntries(new FormData(e.currentTarget))
         try {
+          if (goalName !== undefined && !String(v.name).trim())
+            throw new Error('請填寫人生目標名稱')
           onSave(
             lifeSchema.parse({
               targetAge: Number(v.targetAge),
               targetIncome: Number(v.targetIncome),
               deadline: v.deadline || null,
             }),
+            goalName !== undefined ? String(v.name).trim() : undefined,
           )
           close()
         } catch (e) {
@@ -419,6 +434,11 @@ export function LifeForm({
         }
       }}
     >
+      {goalName !== undefined && (
+        <Field label="人生目標名稱">
+          <input name="name" maxLength={80} defaultValue={goalName} required />
+        </Field>
+      )}
       <div className="form-grid">
         <Field label="目標年齡">
           <input
@@ -427,16 +447,16 @@ export function LifeForm({
             min="1"
             max="100"
             step="1"
-            defaultValue={book.life.targetAge}
+            defaultValue={life.targetAge}
             required
           />
         </Field>
         <Field label="目標年收入（NT$）">
-          <MoneyInput name="targetIncome" defaultValue={book.life.targetIncome} min={1} />
+          <MoneyInput name="targetIncome" defaultValue={life.targetIncome} min={1} />
         </Field>
       </div>
       <Field label="截止日期（選填）">
-        <input name="deadline" type="date" defaultValue={book.life.deadline ?? ''} />
+        <input name="deadline" type="date" defaultValue={life.deadline ?? ''} />
       </Field>
       <p className="info">
         目前年收入由所選年度的實際收入紀錄自動加總。要更新目前年收入，請新增或修改該年度收入紀錄；轉帳與存款總額不會混入。
