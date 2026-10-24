@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { X, ArrowUpRight, Sprout } from 'lucide-react'
+import { X, ArrowUpRight, Sprout, PiggyBank } from 'lucide-react'
 
 export function Modal({
   title,
@@ -139,32 +139,70 @@ export function Empty({ children }: { children: ReactNode }) {
   )
 }
 export function Ring({ value, large = false }: { value: number; large?: boolean }) {
-  const r = 54,
+  const target = Math.min(100, Math.max(0, value))
+  const [displayed, setDisplayed] = useState(target)
+  const current = useRef(target)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let frame = 0
+    const finish = () => {
+      cancelAnimationFrame(frame)
+      current.current = target
+      setDisplayed(target)
+    }
+    if (media.matches || Math.abs(current.current - target) < 0.001) {
+      finish()
+      return
+    }
+    const start = current.current,
+      startedAt = performance.now()
+    const tick = (now: number) => {
+      const time = Math.min(1, Math.max(0, (now - startedAt) / 800))
+      const next = start + (target - start) * (1 - Math.pow(1 - time, 3))
+      current.current = next
+      setDisplayed(next)
+      if (time < 1) frame = requestAnimationFrame(tick)
+    }
+    const onPreference = () => {
+      if (media.matches) finish()
+    }
+    media.addEventListener('change', onPreference)
+    frame = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(frame)
+      media.removeEventListener('change', onPreference)
+    }
+  }, [target])
+  const r = 96,
     circumference = 2 * Math.PI * r
+  const tone = target <= 30 ? 'gentle' : target <= 80 ? 'steady' : 'success'
   return (
     <div
-      className={`goal-ring ${large ? 'large' : ''}`}
+      className={`goal-ring ${large ? 'large' : ''} ${tone}`}
       role="img"
-      aria-label={`完成 ${Math.floor(value)}%`}
+      aria-label={`完成 ${Math.floor(target)}%`}
     >
-      <svg viewBox="0 0 128 128">
-        <circle className="ring-track" cx="64" cy="64" r={r} />
+      <svg className="progress-svg" viewBox="0 0 224 224" aria-hidden="true">
+        <circle className="ring-track" cx="112" cy="112" r={r} />
         <circle
           className="ring-value"
-          cx="64"
-          cy="64"
+          cx="112"
+          cy="112"
           r={r}
           strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - value / 100)}
-          transform="rotate(-90 64 64)"
+          strokeDashoffset={circumference * (1 - displayed / 100)}
+          transform="rotate(-90 112 112)"
         />
       </svg>
-      <div>
-        <strong>
-          {Math.floor(value)}
+      <div className="ring-center" aria-hidden="true">
+        <span className="piggy-icon">
+          <PiggyBank strokeWidth={1.25} />
+        </span>
+        <strong data-testid="animated-percent">
+          {Math.floor(displayed + 0.000001)}
           <small>%</small>
         </strong>
-        <span>目標完成度</span>
+        <span className="ring-label">目標完成度</span>
       </div>
     </div>
   )

@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
-    rollupOptions: { output: { manualChunks: { charts: ['recharts'], validation: ['zod'] } } },
+    rollupOptions: { output: { manualChunks: { validation: ['zod'] } } },
   },
   test: {
     environment: 'jsdom',

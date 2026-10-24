@@ -45,7 +45,7 @@ export function GoalForm({
         }
       }}
     >
-      <Field label="挑戰名稱">
+      <Field label="目標名稱">
         <input
           name="name"
           maxLength={80}
@@ -62,7 +62,7 @@ export function GoalForm({
           <MoneyInput name="saved" defaultValue={goal?.saved ?? 0} />
         </Field>
       </div>
-      <Field label="挑戰截止日期">
+      <Field label="目標截止日期">
         <input
           name="deadline"
           type="date"
@@ -71,10 +71,10 @@ export function GoalForm({
         />
       </Field>
       <p className="info">
-        每個挑戰分別記錄已存金額，同一筆存款請勿重複填入多個挑戰。金額只供追蹤進度，不會操作實際存款。
+        每個目標分別記錄已存金額，同一筆存款請勿重複填入多個目標。金額只供追蹤進度，不會操作實際存款。
       </p>
       {goal?.completedAt && (
-        <p className="info">已解鎖的成就會保留原完成日期與金額。想再挑戰一次，可以建立新的目標。</p>
+        <p className="info">已解鎖的成就會保留原完成日期與金額。想再目標一次，可以建立新的目標。</p>
       )}
       {error && (
         <p className="form-error" role="alert">
@@ -86,7 +86,7 @@ export function GoalForm({
           取消
         </button>
         <button className="button primary" type="submit">
-          儲存挑戰
+          儲存目標
         </button>
       </div>
     </form>
