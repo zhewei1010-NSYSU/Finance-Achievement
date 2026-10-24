@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { X, ArrowUpRight, Landmark, CreditCard, TrendingUp, Wallet, PiggyBank } from 'lucide-react'
-import type { Account } from '../lib/finance'
+import { X, ArrowUpRight, Sprout } from 'lucide-react'
 
 export function Modal({
   title,
@@ -112,23 +111,6 @@ export function MoneyInput({
     />
   )
 }
-export function AccountIcon({ account, size = 22 }: { account: Account; size?: number }) {
-  const Icon =
-    account.category === 'credit'
-      ? CreditCard
-      : account.category === 'investment' || account.category === 'fund'
-        ? TrendingUp
-        : account.category === 'post'
-          ? PiggyBank
-          : account.category === 'custom'
-            ? Wallet
-            : Landmark
-  return (
-    <span className={`account-icon ${account.category}`}>
-      <Icon size={size} />
-    </span>
-  )
-}
 export function SectionHeading({
   eyebrow,
   title,
@@ -151,7 +133,7 @@ export function SectionHeading({
 export function Empty({ children }: { children: ReactNode }) {
   return (
     <div className="empty">
-      <Wallet size={28} />
+      <Sprout size={28} />
       <p>{children}</p>
     </div>
   )
@@ -163,7 +145,7 @@ export function Ring({ value, large = false }: { value: number; large?: boolean 
     <div
       className={`goal-ring ${large ? 'large' : ''}`}
       role="img"
-      aria-label={`完成 ${value.toFixed(0)}%`}
+      aria-label={`完成 ${Math.floor(value)}%`}
     >
       <svg viewBox="0 0 128 128">
         <circle className="ring-track" cx="64" cy="64" r={r} />

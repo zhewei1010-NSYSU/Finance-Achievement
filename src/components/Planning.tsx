@@ -1,22 +1,25 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, Calculator, Info, Save } from 'lucide-react'
-import { planSchema, money, totals, projection } from '../lib/finance'
-import type { FinanceData } from '../lib/finance'
+import { planSchema, money, projection } from '../lib/finance'
+import type { QuestData } from '../lib/quests'
 import { Field, MoneyInput, SectionHeading } from './UI'
 import { ProjectionChart } from './Charts'
 export default function Planning({
   data,
   save,
 }: {
-  data: FinanceData
-  save: (data: FinanceData) => void
+  data: QuestData
+  save: (data: QuestData) => void
 }) {
   const [draft, setDraft] = useState(data.plan)
   const [notice, setNotice] = useState('')
   const p = draft
   const available = p.salary - p.living - p.family - p.savings - p.investment
-  const final = projection(p, totals(data.accounts).net).at(-1)!.value
+  const final = projection(
+    p,
+    data.goals.reduce((sum, goal) => sum + goal.saved, 0),
+  ).at(-1)!.value
   const change = (e: FormEvent<HTMLFormElement>) => {
     const v = Object.fromEntries(new FormData(e.currentTarget))
     const parsed = planSchema.safeParse(
@@ -32,8 +35,10 @@ export default function Planning({
       <SectionHeading eyebrow="BUILD YOUR FUTURE" title="讓未來，從每個月開始" />
       <div className="planning-grid">
         <section className="card">
-          <SectionHeading title="每月收支規劃" action={<Calculator size={21} />} />
-          <p className="muted small">這是預算與假設，不會改動帳戶餘額或記帳紀錄。</p>
+          <SectionHeading title="每月能量分配" action={<Calculator size={21} />} />
+          <p className="muted small">
+            調整每月預算，為下一個關卡準備。這些設定不會更動挑戰的已存金額。
+          </p>
           <form
             onChange={change}
             onSubmit={(e) => {
@@ -46,8 +51,12 @@ export default function Planning({
                 setNotice(parsed.error.issues.map((i) => i.message).join('；'))
                 return
               }
-              save({ ...data, plan: parsed.data })
-              setNotice('規劃已儲存至本機')
+              try {
+                save({ ...data, plan: parsed.data })
+                setNotice('規劃已儲存至本機')
+              } catch (e) {
+                setNotice(e instanceof Error ? e.message : '無法儲存，請稍後重試')
+              }
             }}
           >
             <div className="form-grid">
@@ -145,7 +154,10 @@ export default function Planning({
                 {final >= p.targetAssets ? '假設下達標' : `距目標 ${money(p.targetAssets - final)}`}
               </span>
             </p>
-            <ProjectionChart plan={p} initial={totals(data.accounts).net} />
+            <ProjectionChart
+              plan={p}
+              initial={data.goals.reduce((sum, goal) => sum + goal.saved, 0)}
+            />
             <div className="chart-legend">
               <span>
                 <i className="dot gray" />
@@ -162,7 +174,7 @@ export default function Planning({
             </div>
             <p className="info">
               <Info size={17} />
-              所有投資報酬均為假設，不保證報酬。模型以目前淨資產為基礎，每月底投入儲蓄與投資，投資按月複利；不含稅費、通膨、既有資產報酬與負債利息。虛線為指定資產目標。
+              所有投資報酬均為假設，不保證報酬。模型以所有挑戰已存金額合計為起點，每月底投入儲蓄與投資，投資按月複利；不含稅費、通膨、既有資產報酬與負債利息。虛線為指定資產目標。
             </p>
           </section>
           <div className="card emergency">
