@@ -221,6 +221,7 @@ describe('年度目標與連結驗證', () => {
     const next = removeGoal(d, d.goals[0].id)
     expect(next.records[0].goalId).toBeUndefined()
     expect(next.records[0].amount).toBe(2000)
+    expect(depositRows(next)).toHaveLength(1)
     expect(balances(next)).toEqual(balances(d))
   })
   it('關聯帳戶不能被刪除；對帳不計入收入', () => {
@@ -437,5 +438,46 @@ describe('收入與三分類資產相容及倒數', () => {
     expect(daysUntil('2026-10-24', '2026-10-25')).toBe(-1)
     expect(daysUntil('2028-03-01', '2028-02-28')).toBe(2)
     expect(daysUntil('2026-03-09', '2026-03-07')).toBe(2)
+  })
+})
+
+describe('三分類表單路由與獨立存款', () => {
+  it('新存入優先連結該類目標帳戶，但編輯時保留原本實際帳戶', async () => {
+    const { destinationAccount, sourceAccount } = await import('./ledger')
+    const b = funded()
+    expect(destinationAccount(b, 'savings')?.id).toBe('post')
+    expect(destinationAccount(b, 'savings', 'bank')?.id).toBe('bank')
+    expect(sourceAccount(b, 'savings', 'post')?.id).toBe('bank')
+    expect(destinationAccount(b, 'fund')).toBeUndefined()
+    expect(sourceAccount(b, 'savings', 'post', 'cash')?.id).toBe('cash')
+    expect(sourceAccount(b, 'fund', 'post')).toBeUndefined()
+  })
+  it('未綁定目標的基金存款有完整明細、可修改刪除，轉帳不增加資產或收入', () => {
+    const b = funded()
+    b.accounts.push({ id: 'fund', name: '基金', kind: 'asset', assetClass: 'fund', opening: 0 })
+    const item = record({ toAccountId: 'fund', goalId: undefined, isDeposit: true })
+    const next = replaceRecord(b, null, item)
+    expect(depositRows(next)).toEqual([{ record: item, after: 2000 }])
+    expect(accountTotals(next)).toEqual(accountTotals(b))
+    expect(progress(next, next.goals[0])).toEqual(progress(b, b.goals[0]))
+    expect(annualIncome(next, 2026)).toBe(0)
+    const edited = replaceRecord(next, item.id, { ...item, amount: 3000 })
+    expect(depositRows(edited)[0].after).toBe(3000)
+    expect(depositRows(replaceRecord(edited, item.id))).toEqual([])
+  })
+  it('拒絕把歷史支出標成獨立存款', () => {
+    expect(() =>
+      replaceRecord(
+        funded(),
+        null,
+        record({
+          type: 'expense',
+          toAccountId: undefined,
+          goalId: undefined,
+          categoryId: 'food',
+          isDeposit: true,
+        }),
+      ),
+    ).toThrow()
   })
 })

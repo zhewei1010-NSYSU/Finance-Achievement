@@ -191,7 +191,13 @@ export default function App() {
       .sort((a, b) => (descending ? -1 : 1) * (a.r.date.localeCompare(b.r.date) || a.i - b.i))
       .map((x) => x.r)
   const openRecord = (r: RecordItem) =>
-    setDialog({ type: 'record', record: r, deposit: !!r.goalId, goalId: r.goalId })
+    setDialog({
+      type: 'record',
+      record: r,
+      deposit: !!r.goalId || !!r.isDeposit,
+      goalId: r.goalId,
+      initialType: r.type,
+    })
   const deleteRecord = (r: RecordItem) =>
     confirm(
       '刪除這筆紀錄？',
@@ -272,7 +278,7 @@ export default function App() {
                   </b>
                   <small>
                     {deposits
-                      ? book.goals.find((g) => g.id === r.goalId)?.name
+                      ? (book.goals.find((g) => g.id === r.goalId)?.name ?? '未綁定目標')
                       : r.toAccountId
                         ? `→ ${book.accounts.find((a) => a.id === r.toAccountId)?.name}`
                         : r.settled
@@ -609,7 +615,7 @@ export default function App() {
           </div>
           <button
             className="button primary"
-            disabled={!!loaded.error || (page === 'deposits' && !primary)}
+            disabled={!!loaded.error}
             onClick={() =>
               setDialog(
                 page === 'accounts'
@@ -710,7 +716,9 @@ export default function App() {
                   {recordList(
                     sorted(
                       allDeposits
-                        .filter((x) => !primary || x.record.goalId === primary.id)
+                        .filter(
+                          (x) => !primary || !x.record.goalId || x.record.goalId === primary.id,
+                        )
                         .map((x) => x.record),
                     ).slice(0, 4),
                     true,
@@ -958,12 +966,21 @@ export default function App() {
               goalId={dialog.goalId}
               initialType={dialog.initialType}
               close={close}
-              onSave={(r) => {
-                commit(replaceRecord(book, dialog.record?.id ?? null, r), true)
+              onSave={(r, accounts = []) => {
+                commit(
+                  replaceRecord(
+                    { ...book, accounts: [...book.accounts, ...accounts] },
+                    dialog.record?.id ?? null,
+                    r,
+                  ),
+                  true,
+                )
                 setNotice(
                   r.goalId
                     ? '又更接近目標了！帳戶與存款進度已同步更新。'
-                    : '紀錄已儲存，帳戶餘額已更新。',
+                    : r.isDeposit
+                      ? '存款已儲存，資產與明細已同步更新。'
+                      : '紀錄已儲存，帳戶餘額已更新。',
                 )
               }}
             />

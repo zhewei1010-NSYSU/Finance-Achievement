@@ -30,6 +30,7 @@ export const recordSchema = z
     accountId: text,
     toAccountId: text.optional(),
     goalId: text.optional(),
+    isDeposit: z.boolean().optional(),
     categoryId: text.optional(),
     note: z.string().max(160),
     settled: z.boolean().optional(),
@@ -42,7 +43,7 @@ export const recordSchema = z
       c.addIssue({ code: 'custom', message: '只有轉帳可指定目的帳戶' })
     if (r.type === 'transfer' && r.categoryId)
       c.addIssue({ code: 'custom', message: '轉帳不列入收入或支出類別' })
-    if (r.goalId && r.type === 'expense')
+    if ((r.goalId || r.isDeposit) && r.type === 'expense')
       c.addIssue({ code: 'custom', message: '支出不能作為存款' })
   })
 export const savingGoalSchema = z
@@ -286,7 +287,7 @@ export function removeGoal(book: Book, id: string) {
     goals: book.goals.filter((g) => g.id !== id),
     records: book.records.map((r) => {
       if (r.goalId !== id) return r
-      const next = { ...r }
+      const next = { ...r, isDeposit: true }
       delete next.goalId
       return next
     }),
@@ -302,7 +303,7 @@ export function depositRows(book: Book) {
   for (const r of sorted) {
     if (!r.settled)
       for (const [id, delta] of effects(book, r)) running.set(id, running.get(id)! + delta)
-    if (r.goalId) {
+    if (r.goalId || r.isDeposit) {
       const id = r.type === 'transfer' ? r.toAccountId! : r.accountId
       rows.push({
         record: book.records[r.index],
@@ -449,5 +450,34 @@ export function assetGroups(book: Book) {
 export function daysUntil(deadline: string, now = today()) {
   return Math.round(
     (Date.parse(deadline + 'T00:00:00Z') - Date.parse(now + 'T00:00:00Z')) / 86400000,
+  )
+}
+
+// Keep the exact account when editing; new entries use a stable account in the chosen class.
+export function destinationAccount(
+  book: Book,
+  category: AssetClass,
+  preferredId?: string,
+): BookAccount | undefined {
+  const assets = book.accounts.filter((a) => a.kind === 'asset' && accountClass(a) === category)
+  return (
+    assets.find((a) => a.id === preferredId) ??
+    assets.find((a) => book.goals.some((g) => !g.archived && g.accountId === a.id)) ??
+    assets[0]
+  )
+}
+export function sourceAccount(
+  book: Book,
+  category: AssetClass,
+  destinationId: string,
+  preferredId?: string,
+): BookAccount | undefined {
+  const current = balances(book)
+  const assets = book.accounts.filter(
+    (a) => a.kind === 'asset' && accountClass(a) === category && a.id !== destinationId,
+  )
+  return (
+    assets.find((a) => a.id === preferredId) ??
+    assets.sort((a, b) => current.get(b.id)! - current.get(a.id)!)[0]
   )
 }

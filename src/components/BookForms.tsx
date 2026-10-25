@@ -5,6 +5,8 @@ import {
   accountClass,
   assetClasses,
   balances,
+  destinationAccount,
+  sourceAccount,
   lifeSchema,
   recordSchema,
   savingGoalSchema,
@@ -42,100 +44,168 @@ export function RecordForm({
   record?: RecordItem
   deposit?: boolean
   goalId?: string
-  onSave: (r: RecordItem) => void
+  onSave: (r: RecordItem, accounts?: BookAccount[]) => void
   close: () => void
   initialType?: RecordItem['type']
 }) {
-  const [type, setType] = useState<RecordItem['type']>(
-      record?.type ??
-        (deposit
-          ? book.accounts.some(
-              (a) =>
-                a.kind === 'asset' &&
-                a.id !==
-                  book.goals.find(
-                    (g) => g.id === (goalId ?? book.goals.find((g) => !g.archived)?.id),
-                  )?.accountId,
-            )
-            ? 'transfer'
-            : 'income'
-          : initialType),
-    ),
-    [selectedGoal, setGoal] = useState(
-      record?.goalId ?? goalId ?? book.goals.find((g) => !g.archived)?.id ?? '',
-    ),
-    [error, setError] = useState('')
-  const goal = book.goals.find((g) => g.id === selectedGoal),
-    b = balances(book),
-    assets = book.accounts.filter((a) => a.kind === 'asset')
-  const [destination, setDestination] = useState(
-    record?.toAccountId ?? goal?.accountId ?? assets[1]?.id ?? '',
+  const initialGoal =
+    record?.goalId ??
+    goalId ??
+    (!record ? book.goals.find((g) => !g.archived)?.id : undefined) ??
+    ''
+  const originalDestination = record
+    ? record.type === 'transfer'
+      ? record.toAccountId
+      : record.accountId
+    : deposit
+      ? book.goals.find((g) => g.id === initialGoal)?.accountId
+      : undefined
+  const originalAccount = book.accounts.find((a) => a.id === originalDestination)
+  const [category, setCategory] = useState<AssetClass>(
+    originalAccount ? accountClass(originalAccount) : 'savings',
   )
-  const destinationId = deposit ? goal?.accountId : destination
-  const sourceDefault =
-    record?.accountId ?? assets.find((a) => a.id !== destinationId)?.id ?? assets[0]?.id
+  const [selectedGoal, setGoal] = useState(deposit ? initialGoal : '')
+  const [source, setSource] = useState<AssetClass | 'external'>(() => {
+    if (record?.type === 'income' || (!deposit && initialType === 'income')) return 'external'
+    const originalSource = book.accounts.find((a) => a.id === record?.accountId)
+    if (originalSource) return accountClass(originalSource)
+    const candidates = book.accounts.filter(
+      (a) => a.kind === 'asset' && a.id !== originalDestination,
+    )
+    return candidates.length
+      ? accountClass(
+          candidates.sort(
+            (a, b) => (balances(book).get(b.id) ?? 0) - (balances(book).get(a.id) ?? 0),
+          )[0],
+        )
+      : deposit
+        ? 'external'
+        : 'savings'
+  })
+  const [drafts] = useState(() =>
+    (Object.keys(assetClasses) as AssetClass[]).map((assetClass) => ({
+      id: uid(),
+      name: assetClasses[assetClass],
+      kind: 'asset' as const,
+      assetClass,
+      opening: 0,
+    })),
+  )
+  const [error, setError] = useState('')
+  const goal = book.goals.find((g) => g.id === selectedGoal)
+  const preferred = deposit ? (goal?.accountId ?? originalDestination) : originalDestination
+  const destination =
+    destinationAccount(book, category, preferred) ?? drafts.find((a) => a.assetClass === category)!
+  const from =
+    source === 'external'
+      ? undefined
+      : sourceAccount(
+          book,
+          source,
+          destination.id,
+          record?.type === 'transfer' ? record.accountId : undefined,
+        )
+  const recordType = deposit
+    ? source === 'external'
+      ? 'income'
+      : 'transfer'
+    : (record?.type ?? initialType)
+  const b = balances(book)
+  const options = Object.entries(assetClasses).map(([id, name]) => (
+    <option key={id} value={id}>
+      {name}
+    </option>
+  ))
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault()
         const v = Object.fromEntries(new FormData(e.currentTarget))
         try {
-          const external = deposit && v.source === 'external',
-            recordType = external ? 'income' : deposit ? 'transfer' : type
-          const arrivingAccount =
-            recordType === 'transfer' ? destinationId : String(v.accountId ?? '')
-          const matchingGoals =
-            !deposit && recordType !== 'expense'
-              ? book.goals.filter((g) => !g.archived && g.accountId === arrivingAccount)
-              : []
+          if (recordType === 'transfer' && !from)
+            throw new Error(
+              '此來源分類沒有可轉出的其他帳戶。請選擇另一個來源，或先到「我的資產」設定資產餘額。',
+            )
+          const matchingGoals = book.goals.filter(
+            (g) => !g.archived && g.accountId === destination.id,
+          )
+          const linkedGoal = deposit
+            ? goal
+            : matchingGoals.length === 1
+              ? matchingGoals[0]
+              : undefined
           const next = recordSchema.parse({
             id: record?.id ?? uid(),
             type: recordType,
             date: v.date,
             amount: Number(v.amount),
-            accountId: external ? goal?.accountId : deposit ? v.source : v.accountId,
-            ...(recordType === 'transfer' ? { toAccountId: destinationId } : {}),
-            ...(recordType !== 'transfer'
-              ? {
-                  categoryId: external
-                    ? (v.categoryId ?? book.categories.find((c) => c.type === 'income')?.id)
-                    : v.categoryId,
-                }
-              : {}),
-            ...(deposit
-              ? { goalId: selectedGoal }
-              : matchingGoals.length === 1
-                ? { goalId: matchingGoals[0].id }
-                : {}),
+            accountId: recordType === 'transfer' ? from?.id : destination.id,
+            ...(recordType === 'transfer'
+              ? { toAccountId: destination.id }
+              : { categoryId: v.categoryId }),
+            ...(linkedGoal ? { goalId: linkedGoal.id } : {}),
+            ...(deposit || record?.isDeposit ? { isDeposit: true } : {}),
             note: String(v.note ?? ''),
           })
-          onSave(next)
+          onSave(next, book.accounts.some((a) => a.id === destination.id) ? [] : [destination])
           close()
         } catch (e) {
           setError(errorText(e))
         }
       }}
     >
+      <Field
+        label="存入帳戶"
+        hint={`本筆實際存入：${destination.name}${book.accounts.some((a) => a.id === destination.id) ? '' : '（首次使用時建立零餘額帳戶）'}。不會移動或覆寫其他既有資產。`}
+      >
+        <select
+          aria-label="存入帳戶"
+          name="destinationClass"
+          value={category}
+          onChange={(e) => {
+            const next = e.target.value as AssetClass
+            setCategory(next)
+            setError('')
+            if (deposit) {
+              const candidates = book.goals.filter(
+                (g) =>
+                  !g.archived &&
+                  accountClass(book.accounts.find((a) => a.id === g.accountId)!) === next,
+              )
+              setGoal(candidates.length === 1 ? candidates[0].id : '')
+            }
+          }}
+          required
+        >
+          {options}
+        </select>
+      </Field>
       {deposit && (
-        <>
-          <Field label="所屬儲蓄目標">
-            <select value={selectedGoal} onChange={(e) => setGoal(e.target.value)} required>
-              {book.goals
-                .filter((g) => !g.archived || g.id === record?.goalId)
-                .map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Field label="存入帳戶">
-            <input
-              value={book.accounts.find((a) => a.id === goal?.accountId)?.name ?? ''}
-              readOnly
-            />
-          </Field>
-        </>
+        <Field
+          label="所屬儲蓄目標"
+          hint="只有存入目標指定帳戶，才會連動該目標；未綁定的存款仍保留完整明細。"
+        >
+          <select
+            value={selectedGoal}
+            onChange={(e) => {
+              setGoal(e.target.value)
+              setError('')
+            }}
+          >
+            <option value="">不綁定儲蓄目標</option>
+            {book.goals
+              .filter(
+                (g) =>
+                  (!g.archived || g.id === record?.goalId) &&
+                  accountClass(book.accounts.find((a) => a.id === g.accountId)!) === category,
+              )
+              .map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+          </select>
+        </Field>
       )}
       <div className="form-grid">
         <Field label="日期">
@@ -151,70 +221,45 @@ export function RecordForm({
           <MoneyInput name="amount" defaultValue={record?.amount ?? 0} min={1} />
         </Field>
       </div>
-      {deposit ? (
-        <Field label="資金來源" hint="帳戶間轉帳不會增加總資產或收入；只有外部新收入會列入收入。">
+      {(deposit || recordType === 'transfer') && (
+        <Field
+          label="資金來源"
+          hint={
+            source === 'external'
+              ? '只有真正的新收入才選此項，已入帳的收入請用分類間轉帳。'
+              : from
+                ? `本筆由 ${from.name} 轉出，可用餘額 ${money(b.get(from.id) ?? 0)}；轉帳不增加收入或總資產。`
+                : '此分類尚無可轉出的其他帳戶，請先設定資產或選擇其他來源。'
+          }
+        >
           <select
-            key={selectedGoal}
-            name="source"
-            defaultValue={
-              record?.type === 'income' || !assets.some((a) => a.id !== goal?.accountId)
-                ? 'external'
-                : sourceDefault
-            }
-            onChange={(e) => setType(e.target.value === 'external' ? 'income' : 'transfer')}
+            aria-label="資金來源"
+            name="sourceClass"
+            value={source}
+            onChange={(e) => {
+              setSource(e.target.value as AssetClass | 'external')
+              setError('')
+            }}
             required
           >
-            {assets
-              .filter((a) => a.id !== goal?.accountId)
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  從 {a.name} 轉入（餘額 {money(b.get(a.id) ?? 0)}）
-                </option>
-              ))}
-            <option value="external">外部新收入（會計入收入）</option>
-          </select>
-        </Field>
-      ) : (
-        <Field label={type === 'transfer' ? '轉出帳戶' : '交易帳戶'}>
-          <select
-            name="accountId"
-            key={type}
-            defaultValue={record?.accountId ?? assets[0]?.id}
-            required
-          >
-            {assets.map((a) => (
-              <option value={a.id} key={a.id}>
-                {a.name}（{money(b.get(a.id) ?? 0)}）
-              </option>
-            ))}
+            {options}
+            {deposit && <option value="external">外部新收入（會計入收入）</option>}
           </select>
         </Field>
       )}
-      {!deposit && type === 'transfer' && (
-        <Field label="存入帳戶">
-          <select value={destination} onChange={(e) => setDestination(e.target.value)} required>
-            {assets.map((a) => (
-              <option value={a.id} key={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
-      {((deposit && type === 'income') || (!deposit && type !== 'transfer')) && (
+      {recordType === 'income' && (
         <Field label="收入類別">
           <select
             name="categoryId"
             defaultValue={
-              record?.categoryId ??
-              book.categories.find((c) => c.type === (deposit ? 'income' : type))?.id
+              record?.categoryId ?? book.categories.find((c) => c.type === 'income')?.id
             }
             required
           >
             {book.categories
-              .filter((c) => c.type === (deposit ? 'income' : type))
+              .filter((c) => c.type === 'income')
               .map((c) => (
-                <option value={c.id} key={c.id}>
+                <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
@@ -229,18 +274,11 @@ export function RecordForm({
           placeholder="例如：每月固定儲蓄"
         />
       </Field>
-      {deposit && (
-        <p className="info">
-          帳戶間移動只記錄一次，不列入收入，也不增加總資產；外部新收入則同步至收入紀錄。請確認來源餘額足夠。
-        </p>
-      )}
-      {!deposit && (
-        <p className="info">
-          {type === 'transfer'
-            ? '轉帳只在資產帳戶間移動，不列入收入或增加總資產。'
-            : '只記錄真正的新收入。分類間資金移動請至「我的資產」使用轉帳，避免重複計算收入。'}
-        </p>
-      )}
+      <p className="info">
+        {recordType === 'transfer'
+          ? '分類間資金移動只記錄一次，不計收入，也不增加總資產。'
+          : '只記錄真正的新收入。已入帳的錢請使用轉帳，避免重複計算收入。'}
+      </p>
       {error && (
         <p role="alert" className="form-error">
           {error}
@@ -249,7 +287,13 @@ export function RecordForm({
       <Actions
         close={close}
         label={
-          record ? '儲存修改' : deposit ? '新增存款' : type === 'transfer' ? '確認轉帳' : '新增收入'
+          record
+            ? '儲存修改'
+            : deposit
+              ? '新增存款'
+              : recordType === 'transfer'
+                ? '確認轉帳'
+                : '新增收入'
         }
       />
     </form>
