@@ -14,6 +14,7 @@ export const bookAccountSchema = z
     id: text,
     name: text,
     kind: z.enum(['asset', 'liability']),
+    assetClass: z.enum(['savings', 'investment', 'fund']).optional(),
     opening: z.number().finite().int().min(-1e15).max(1e15),
   })
   .strict()
@@ -227,7 +228,13 @@ export function replaceRecord(book: Book, id: string | null, next?: RecordItem) 
 }
 export function saveAccount(
   book: Book,
-  account: { id: string; name: string; kind: 'asset' | 'liability'; balance: number },
+  account: {
+    id: string
+    name: string
+    kind: 'asset' | 'liability'
+    balance: number
+    assetClass?: AssetClass
+  },
 ) {
   const old = book.accounts.find((a) => a.id === account.id)
   if (
@@ -245,6 +252,9 @@ export function saveAccount(
     name: account.name,
     kind: account.kind,
     opening: account.balance - delta,
+    ...(account.assetClass || old?.assetClass
+      ? { assetClass: account.assetClass ?? old?.assetClass }
+      : {}),
   }
   return validBook({
     ...book,
@@ -411,5 +421,33 @@ export function matchesRecordDate(
     (!filter.month || record.date.startsWith(filter.month)) &&
     (!filter.from || record.date >= filter.from) &&
     (!filter.to || record.date <= filter.to)
+  )
+}
+
+export const assetClasses = { savings: '儲蓄', investment: '投資', fund: '基金' } as const
+export type AssetClass = keyof typeof assetClasses
+export function accountClass(account: BookAccount): AssetClass {
+  return (
+    account.assetClass ??
+    (/基金/.test(account.name)
+      ? 'fund'
+      : /投資|證券|股票/.test(account.name)
+        ? 'investment'
+        : 'savings')
+  )
+}
+export function assetGroups(book: Book) {
+  const current = balances(book)
+  return (Object.keys(assetClasses) as AssetClass[]).map((id) => ({
+    id,
+    name: assetClasses[id],
+    amount: book.accounts
+      .filter((a) => a.kind === 'asset' && accountClass(a) === id)
+      .reduce((sum, a) => sum + current.get(a.id)!, 0),
+  }))
+}
+export function daysUntil(deadline: string, now = today()) {
+  return Math.round(
+    (Date.parse(deadline + 'T00:00:00Z') - Date.parse(now + 'T00:00:00Z')) / 86400000,
   )
 }

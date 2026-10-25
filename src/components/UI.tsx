@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { daysUntil } from '../lib/ledger'
 import PinkPig from './PinkPig'
 import { X, ArrowUpRight, Sprout } from 'lucide-react'
 
@@ -245,4 +246,32 @@ export function ActionLink({ children, onClick }: { children: ReactNode; onClick
       <ArrowUpRight size={16} />
     </button>
   )
+}
+
+export function Countdown({ deadline }: { deadline: string }) {
+  const [, refresh] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => refresh((n) => n + 1), 30000)
+    return () => clearInterval(timer)
+  }, [])
+  const days = daysUntil(deadline)
+  return (
+    <p className="countdown" aria-label="目標天數倒數">
+      <CalendarIcon />
+      {days > 0 ? (
+        <>
+          距離目標還有 <b>{days}</b> 天
+        </>
+      ) : days === 0 ? (
+        <b>今天截止</b>
+      ) : (
+        <>
+          已超過目標日期 <b>{-days}</b> 天
+        </>
+      )}
+    </p>
+  )
+}
+function CalendarIcon() {
+  return <span aria-hidden="true" className="countdown-dot" />
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Flag, MoreHorizontal, Mountain, Plus, Trash2 } from 'lucide-react'
 import { money } from '../lib/finance'
+import { Countdown } from './UI'
 import type { Book } from '../lib/ledger'
 export default function LifeCard({
   life,
@@ -75,8 +76,12 @@ export default function LifeCard({
         距離目標還差 <b>{money(Math.max(0, life.targetIncome - annual))}</b>
       </p>
       {life.deadline && (
-        <p className="small muted">截止日期：{life.deadline.replaceAll('-', '/')}</p>
+        <div>
+          <p className="small muted">截止日期：{life.deadline.replaceAll('-', '/')}</p>
+          <Countdown deadline={life.deadline} />
+        </div>
       )}
+      {!life.deadline && <p className="small muted">設定截止日期後，即可查看天數倒數。</p>}
       <button className="button secondary" onClick={onIncome}>
         <Plus size={15} />
         紀錄一筆收入

@@ -389,3 +389,53 @@ describe('目標整合與舊格式相容', () => {
     expect(fresh.records).toEqual([])
   })
 })
+
+describe('收入與三分類資產相容及倒數', () => {
+  it('舊帳戶按名稱分類，新分類覆寫推斷，合計只計算一次且不含負債', async () => {
+    const { assetGroups } = await import('./ledger')
+    const b = funded()
+    b.accounts.push({ id: 'stock', name: '國泰投資', kind: 'asset', opening: 3000 })
+    b.accounts.push({ id: 'fund', name: '高銀基金', kind: 'asset', opening: 2000 })
+    b.accounts.push({
+      id: 'custom',
+      name: '自訂基金',
+      kind: 'asset',
+      opening: 1000,
+      assetClass: 'investment',
+    })
+    const groups = assetGroups(validBook(b))
+    expect(groups.find((g) => g.id === 'investment')?.amount).toBe(4000)
+    expect(groups.find((g) => g.id === 'fund')?.amount).toBe(2000)
+    expect(groups.reduce((sum, g) => sum + g.amount, 0)).toBe(accountTotals(b).assets)
+  })
+  it('跨三分類轉帳及編輯刪除只移動餘額，不增加收入或資產', async () => {
+    const { assetGroups } = await import('./ledger')
+    const b = funded()
+    b.accounts[0].assetClass = 'investment'
+    b.accounts.find((a) => a.id === 'cash')!.assetClass = 'fund'
+    const next = replaceRecord(b, null, record())
+    const moved = replaceRecord(
+      next,
+      null,
+      record({ id: 'r2', accountId: 'post', toAccountId: 'cash', amount: 1000, goalId: undefined }),
+    )
+    expect(accountTotals(moved).assets).toBe(accountTotals(b).assets)
+    expect(annualIncome(moved, 2026)).toBe(0)
+    expect(assetGroups(moved).find((g) => g.id === 'fund')?.amount).toBe(1000)
+    const edited = replaceRecord(
+      moved,
+      'r2',
+      record({ id: 'r2', accountId: 'post', toAccountId: 'cash', amount: 1500, goalId: undefined }),
+    )
+    expect(assetGroups(edited).find((g) => g.id === 'fund')?.amount).toBe(1500)
+    expect(accountTotals(replaceRecord(edited, 'r2')).assets).toBe(accountTotals(b).assets)
+  })
+  it('日曆天倒數包含當天、逾期與閏年，無時區或夏令時間誤差', async () => {
+    const { daysUntil } = await import('./ledger')
+    expect(daysUntil('2026-12-31', '2026-10-25')).toBe(67)
+    expect(daysUntil('2026-10-25', '2026-10-25')).toBe(0)
+    expect(daysUntil('2026-10-24', '2026-10-25')).toBe(-1)
+    expect(daysUntil('2028-03-01', '2028-02-28')).toBe(2)
+    expect(daysUntil('2026-03-09', '2026-03-07')).toBe(2)
+  })
+})

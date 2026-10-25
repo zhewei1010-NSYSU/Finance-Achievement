@@ -84,7 +84,7 @@ test('真正外部存款只列一筆收入，不重複建立交易', async ({ pa
   await page.getByRole('button', { name: '新增存款', exact: true }).click()
   await page.getByLabel('金額（NT$）', { exact: true }).fill('3000')
   await page.getByLabel('資金來源').selectOption('external')
-  await page.getByLabel('收支類別').selectOption('salary')
+  await page.getByLabel('收入類別').selectOption('salary')
   await page.getByLabel('備註').fill('外部薪資')
   await page.getByRole('dialog').getByRole('button', { name: '新增存款', exact: true }).click()
   await expect(page.locator('.metric-card').filter({ hasText: '本月收入' })).toContainText(
@@ -98,14 +98,13 @@ test('真正外部存款只列一筆收入，不重複建立交易', async ({ pa
 test('年收入目標依年度實際收入，與存款目標分開且可修改', async ({ page }) => {
   await fund(page)
   await deposit(page, '2000')
-  await page.getByRole('button', { name: '記一筆', exact: true }).click()
-  await page.getByRole('dialog').getByRole('button', { name: '收入', exact: true }).click()
+  await page.getByRole('button', { name: '新增收入', exact: true }).click()
   await page.getByLabel('金額（NT$）', { exact: true }).fill('100000')
   await page.getByLabel('日期', { exact: true }).fill('2026-01-15')
   await page.getByLabel('交易帳戶').selectOption('bank')
-  await page.getByLabel('收支類別').selectOption('salary')
+  await page.getByLabel('收入類別').selectOption('salary')
   await page.getByLabel('備註').fill('年度薪資')
-  await page.getByRole('dialog').getByRole('button', { name: '新增紀錄', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '新增收入', exact: true }).click()
   await expect(page.locator('.life-income')).toContainText('NT$100,000')
   await expect(page.locator('.life-progress')).toContainText('10%')
   await expect(page.getByTestId('animated-percent')).toHaveText('5%')
@@ -145,33 +144,35 @@ test('首次達標金幣與慶祝只播放一次，重開不播放，完成紀�
     page.getByRole('heading', { name: '恭喜！儲蓄目標達成！', exact: true }),
   ).toBeVisible()
 })
-test('帳戶與類別可新增、編輯、刪除，帳戶對帳不列為收入', async ({ page }) => {
-  await page.getByRole('navigation').getByRole('button', { name: '帳戶總覽', exact: true }).click()
+test('我的資產只有三分類，帳戶對帳及重新分類不會列為收入', async ({ page }) => {
+  await page.getByRole('navigation').getByRole('button', { name: '我的資產', exact: true }).click()
+  await expect(page.locator('.account-card h2')).toHaveText(['儲蓄', '投資', '基金'])
+  await page.getByRole('button', { name: '管理資產', exact: true }).click()
   await page.getByRole('button', { name: '新增帳戶', exact: true }).click()
-  await page.getByLabel('帳戶名稱').fill('測試錢包')
+  await page.getByLabel('帳戶名稱').fill('測試投資')
+  await page.getByLabel('資產分類').selectOption('investment')
   await page.getByLabel('目前餘額（NT$）').fill('5000')
   await page.getByRole('button', { name: '儲存帳戶' }).click()
-  await expect(page.getByRole('heading', { name: '測試錢包' })).toBeVisible()
-  const card = page
-    .locator('.account-card')
-    .filter({ has: page.getByRole('heading', { name: '測試錢包' }) })
-  await card.getByRole('button', { name: '編輯帳戶' }).click()
-  await page.getByLabel('帳戶名稱').fill('小錢包')
+  await expect(page.locator('.account-card').filter({ hasText: '投資' })).toContainText('NT$5,000')
+  await page.getByRole('button', { name: '管理資產', exact: true }).click()
+  await page.getByRole('button', { name: /測試投資/ }).click()
+  await page.getByLabel('資產分類').selectOption('fund')
   await page.getByRole('button', { name: '儲存帳戶' }).click()
-  await page.getByRole('button', { name: '刪除小錢包' }).click()
-  await page.getByRole('button', { name: '確認操作' }).click()
-  await expect(page.getByRole('heading', { name: '小錢包' })).toHaveCount(0)
-  await page.getByRole('navigation').getByRole('button', { name: '收支紀錄', exact: true }).click()
+  await expect(page.locator('.account-card').filter({ hasText: '基金' })).toContainText('NT$5,000')
+  await page.getByRole('navigation').getByRole('button', { name: '首頁', exact: true }).click()
+  await expect(page.locator('.metric-card').filter({ hasText: '本月收入' })).toContainText('NT$0')
+  await page.getByRole('navigation').getByRole('button', { name: '收入紀錄', exact: true }).click()
   await page.getByRole('button', { name: '管理類別' }).click()
+  await expect(page.getByRole('dialog')).not.toContainText('支出')
   await page.getByRole('button', { name: '新增類別' }).click()
-  await page.getByLabel('類別名稱').fill('旅遊')
+  await page.getByLabel('類別名稱').fill('接案')
   await page.getByRole('button', { name: '儲存類別' }).click()
   await page.getByRole('button', { name: '管理類別' }).click()
-  await page.getByRole('button', { name: '編輯類別旅遊' }).click()
-  await page.getByLabel('類別名稱').fill('旅行')
+  await page.getByRole('button', { name: '編輯類別接案' }).click()
+  await page.getByLabel('類別名稱').fill('兼職')
   await page.getByRole('button', { name: '儲存類別' }).click()
   await page.getByRole('button', { name: '管理類別' }).click()
-  await page.getByRole('button', { name: '刪除類別旅行' }).click()
+  await page.getByRole('button', { name: '刪除類別兼職' }).click()
   await page.getByRole('button', { name: '確認操作' }).click()
 })
 test('儲蓄目標可管理且依指定帳戶餘額，刪除目標不刪存款', async ({ page }) => {
@@ -311,7 +312,7 @@ test('手機320px至桌面版正常，主要文字深色，沒有健康分數或
   await page.screenshot({ path: 'artifacts/finance-desktop.png', fullPage: true })
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 })
-    for (const name of ['首頁', '存錢明細', '帳戶總覽', '收支紀錄', '儲蓄目標']) {
+    for (const name of ['首頁', '存錢明細', '我的資產', '收入紀錄', '儲蓄目標']) {
       await page.getByRole('navigation').getByRole('button', { name, exact: true }).click()
       await expect(page.locator('h1')).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
@@ -377,15 +378,16 @@ test('跨分頁更新不覆蓋新資料，重新整理後可接續使用', async
   await expect(page.getByRole('img', { name: '完成 5%' })).toBeVisible()
 })
 
-test('一般轉帳自動連結唯一儲蓄目標，共用一筆存款與收支紀錄', async ({ page }) => {
+test('一般轉帳自動連結唯一儲蓄目標，共用一筆存款與收入紀錄', async ({ page }) => {
   await fund(page)
-  await page.getByRole('button', { name: '記一筆', exact: true }).click()
-  await page.getByRole('dialog').getByRole('button', { name: '帳戶轉帳', exact: true }).click()
+  await page.getByRole('navigation').getByRole('button', { name: '我的資產', exact: true }).click()
+  await page.getByRole('button', { name: '資產間轉帳', exact: true }).click()
   await page.getByLabel('轉出帳戶').selectOption('bank')
   await page.getByLabel('存入帳戶').selectOption('post')
   await page.getByLabel('金額（NT$）', { exact: true }).fill('5000')
   await page.getByLabel('備註').fill('一般轉帳儲蓄')
-  await page.getByRole('dialog').getByRole('button', { name: '新增紀錄', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '確認轉帳', exact: true }).click()
+  await page.getByRole('navigation').getByRole('button', { name: '首頁', exact: true }).click()
   await expect(page.locator('.deposit-preview-card')).toContainText('一般轉帳儲蓄')
   await expect(page.getByRole('img', { name: '完成 12%' })).toBeVisible()
   const data = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
@@ -397,10 +399,10 @@ test('一般轉帳自動連結唯一儲蓄目標，共用一筆存款與收支�
 test('導覽順序、單枚金幣、80%提示與來源帳戶符合整合需求', async ({ page }) => {
   await expect(page.getByRole('navigation').getByRole('button')).toHaveText([
     '首頁',
-    '收支紀錄',
+    '收入紀錄',
     '存錢明細',
     '儲蓄目標',
-    '帳戶總覽',
+    '我的資產',
   ])
   await fund(page, 30000)
   await deposit(page, '2000', '接近目標')
@@ -422,10 +424,10 @@ test('存款與收支可查詢日期區間，不改動每月統計或紀錄', as
   await expect(page.locator('tbody')).toContainText('月底存款')
   await expect(page.locator('.date-query-total')).toContainText('NT$3,000')
   await expect(page.locator('.filter-bar')).toContainText('NT$5,000')
-  await page.getByRole('navigation').getByRole('button', { name: '收支紀錄', exact: true }).click()
-  await expect(page.locator('tbody tr')).toHaveCount(1)
+  await page.getByRole('navigation').getByRole('button', { name: '收入紀錄', exact: true }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(0)
   await page.getByRole('button', { name: '清除篩選', exact: true }).click()
-  await expect(page.locator('tbody tr')).toHaveCount(2)
+  await expect(page.locator('tbody tr')).toHaveCount(0)
 })
 
 test('封存與還原保留明細及餘額，首頁不再顯示封存目標', async ({ page }) => {
@@ -479,4 +481,78 @@ test('首頁下方及目標頁可管理獨立人生目標，不混入存款', as
   expect(data.lifeGoals[0].targetIncome).toBe(1800000)
   expect(data.goals[0].target).toBe(40000)
   expect(data.records).toHaveLength(0)
+})
+
+test('隱藏支出保留歷史原文，編輯收入類別不遺失支出分類及餘額', async ({ page }) => {
+  await fund(page)
+  const original = await page.evaluate((k) => {
+    const b = JSON.parse(localStorage.getItem(k)!)
+    b.records.push({
+      id: 'historic-expense',
+      type: 'expense',
+      date: '2026-10-20',
+      amount: 1200,
+      accountId: 'bank',
+      categoryId: 'food',
+      note: '既有支出',
+    })
+    localStorage.setItem(k, JSON.stringify(b))
+    return b
+  }, key)
+  await page.reload()
+  await expect(page.locator('.overview-grid')).not.toContainText('支出')
+  await expect(page.locator('.overview-grid')).not.toContainText('結餘')
+  await expect(page.locator('.metric-card').filter({ hasText: '目前總資產' })).toContainText(
+    'NT$58,800',
+  )
+  await page.getByRole('navigation').getByRole('button', { name: '收入紀錄', exact: true }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(0)
+  await page.getByRole('button', { name: '管理類別' }).click()
+  await expect(page.getByRole('dialog')).not.toContainText('支出')
+  await page.getByRole('button', { name: '編輯類別薪資' }).click()
+  await page.getByLabel('類別名稱').fill('工作薪資')
+  await page.getByRole('button', { name: '儲存類別' }).click()
+  const updated = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
+  expect(updated.records).toEqual(original.records)
+  expect(updated.accounts).toEqual(original.accounts)
+  expect(updated.categories.filter((c: { type: string }) => c.type === 'expense')).toEqual(
+    original.categories.filter((c: { type: string }) => c.type === 'expense'),
+  )
+  await page.reload()
+  await expect(page.locator('.metric-card').filter({ hasText: '目前總資產' })).toContainText(
+    'NT$58,800',
+  )
+})
+
+test('大型收入視窗可新增編輯刪除查詢，只提供收入；減少動畫及倒數正常', async ({ page }) => {
+  await expect(page.getByLabel('目標天數倒數')).toContainText('67 天')
+  await page.getByRole('button', { name: '新增收入', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveClass(/wide/)
+  await expect(page.getByRole('dialog')).toHaveCSS('animation-name', 'modal-pop-in')
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: '支出', exact: true }),
+  ).toHaveCount(0)
+  await page.getByLabel('日期', { exact: true }).fill('2026-10-21')
+  await page.getByLabel('金額（NT$）', { exact: true }).fill('5000')
+  await page.getByLabel('交易帳戶').selectOption('bank')
+  await page.getByLabel('備註').fill('測試收入')
+  await page.getByRole('dialog').getByRole('button', { name: '新增收入', exact: true }).click()
+  await page.getByRole('navigation').getByRole('button', { name: '收入紀錄', exact: true }).click()
+  await page.getByLabel('收入起始日期').fill('2026-10-22')
+  await expect(page.locator('tbody tr')).toHaveCount(0)
+  await page.getByRole('button', { name: '清除篩選', exact: true }).click()
+  await page.getByRole('button', { name: '編輯紀錄測試收入' }).click()
+  await page.getByLabel('金額（NT$）', { exact: true }).fill('6000')
+  await page.getByRole('button', { name: '儲存修改' }).click()
+  await expect(page.locator('tbody')).toContainText('NT$6,000')
+  await page.getByRole('button', { name: '刪除紀錄測試收入' }).click()
+  await page.getByRole('button', { name: '確認操作' }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(0)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.getByRole('button', { name: '新增收入', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCSS('animation-name', 'none')
+  await page.getByRole('button', { name: '關閉視窗' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: '首頁', exact: true }).click()
+  await page.clock.fastForward(86400000)
+  await expect(page.getByLabel('目標天數倒數')).toContainText('66 天')
 })

@@ -1,8 +1,15 @@
 import { useState } from 'react'
 import { z } from 'zod'
 import { today, uid, money } from '../lib/finance'
-import { balances, lifeSchema, recordSchema, savingGoalSchema } from '../lib/ledger'
-import type { Book, BookAccount, RecordItem, SavingGoal } from '../lib/ledger'
+import {
+  accountClass,
+  assetClasses,
+  balances,
+  lifeSchema,
+  recordSchema,
+  savingGoalSchema,
+} from '../lib/ledger'
+import type { AssetClass, Book, BookAccount, RecordItem, SavingGoal } from '../lib/ledger'
 import { Field, MoneyInput } from './UI'
 const errorText = (e: unknown) =>
   e instanceof z.ZodError
@@ -29,7 +36,7 @@ export function RecordForm({
   goalId,
   onSave,
   close,
-  initialType = 'expense',
+  initialType = 'income',
 }: {
   book: Book
   record?: RecordItem
@@ -109,23 +116,6 @@ export function RecordForm({
         }
       }}
     >
-      {!deposit && (
-        <div className="segmented">
-          {(['income', 'expense', 'transfer'] as const).map((t) => (
-            <button
-              type="button"
-              key={t}
-              className={type === t ? 'active' : ''}
-              onClick={() => {
-                setType(t)
-                setError('')
-              }}
-            >
-              {{ income: '收入', expense: '支出', transfer: '帳戶轉帳' }[t]}
-            </button>
-          ))}
-        </div>
-      )}
       {deposit && (
         <>
           <Field label="所屬儲蓄目標">
@@ -164,6 +154,7 @@ export function RecordForm({
       {deposit ? (
         <Field label="資金來源" hint="帳戶間轉帳不會增加總資產或收入；只有外部新收入會列入收入。">
           <select
+            key={selectedGoal}
             name="source"
             defaultValue={
               record?.type === 'income' || !assets.some((a) => a.id !== goal?.accountId)
@@ -188,26 +179,21 @@ export function RecordForm({
           <select
             name="accountId"
             key={type}
-            defaultValue={
-              record?.accountId ??
-              book.accounts.find((a) => type !== 'income' || a.kind === 'asset')?.id
-            }
+            defaultValue={record?.accountId ?? assets[0]?.id}
             required
           >
-            {book.accounts
-              .filter((a) => type !== 'income' || a.kind === 'asset')
-              .map((a) => (
-                <option value={a.id} key={a.id}>
-                  {a.name}（{money(b.get(a.id) ?? 0)}）
-                </option>
-              ))}
+            {assets.map((a) => (
+              <option value={a.id} key={a.id}>
+                {a.name}（{money(b.get(a.id) ?? 0)}）
+              </option>
+            ))}
           </select>
         </Field>
       )}
       {!deposit && type === 'transfer' && (
         <Field label="存入帳戶">
           <select value={destination} onChange={(e) => setDestination(e.target.value)} required>
-            {book.accounts.map((a) => (
+            {assets.map((a) => (
               <option value={a.id} key={a.id}>
                 {a.name}
               </option>
@@ -216,7 +202,7 @@ export function RecordForm({
         </Field>
       )}
       {((deposit && type === 'income') || (!deposit && type !== 'transfer')) && (
-        <Field label="收支類別">
+        <Field label="收入類別">
           <select
             name="categoryId"
             defaultValue={
@@ -245,12 +231,14 @@ export function RecordForm({
       </Field>
       {deposit && (
         <p className="info">
-          此紀錄會同步出現在收支紀錄，只計算一次。先確認資金來源帳戶餘額足夠；原有餘額可在帳戶總覽對帳。
+          帳戶間移動只記錄一次，不列入收入，也不增加總資產；外部新收入則同步至收入紀錄。請確認來源餘額足夠。
         </p>
       )}
       {!deposit && (
         <p className="info">
-          刷卡請選支出及信用卡帳戶；繳卡費請用轉帳。存入帳戶若只有一個對應目標，會自動關聯存錢明細；同帳戶有多個目標時，請使用「新增存款」明確選擇。
+          {type === 'transfer'
+            ? '轉帳只在資產帳戶間移動，不列入收入或增加總資產。'
+            : '只記錄真正的新收入。分類間資金移動請至「我的資產」使用轉帳，避免重複計算收入。'}
         </p>
       )}
       {error && (
@@ -258,7 +246,12 @@ export function RecordForm({
           {error}
         </p>
       )}
-      <Actions close={close} label={record ? '儲存修改' : deposit ? '新增存款' : '新增紀錄'} />
+      <Actions
+        close={close}
+        label={
+          record ? '儲存修改' : deposit ? '新增存款' : type === 'transfer' ? '確認轉帳' : '新增收入'
+        }
+      />
     </form>
   )
 }
@@ -270,7 +263,13 @@ export function AccountForm({
 }: {
   book: Book
   account?: BookAccount
-  onSave: (a: { id: string; name: string; kind: 'asset' | 'liability'; balance: number }) => void
+  onSave: (a: {
+    id: string
+    name: string
+    kind: 'asset' | 'liability'
+    balance: number
+    assetClass?: AssetClass
+  }) => void
   close: () => void
 }) {
   const [error, setError] = useState('')
@@ -283,7 +282,8 @@ export function AccountForm({
           onSave({
             id: account?.id ?? uid(),
             name: String(v.name).trim(),
-            kind: v.kind as 'asset' | 'liability',
+            kind: account?.kind ?? 'asset',
+            assetClass: v.assetClass as AssetClass,
             balance: Number(v.balance),
           })
           close()
@@ -296,10 +296,13 @@ export function AccountForm({
         <input name="name" maxLength={80} required defaultValue={account?.name} />
       </Field>
       <div className="form-grid">
-        <Field label="帳戶類型">
-          <select name="kind" defaultValue={account?.kind ?? 'asset'}>
-            <option value="asset">資產</option>
-            <option value="liability">負債／信用卡</option>
+        <Field label="資產分類">
+          <select name="assetClass" defaultValue={account ? accountClass(account) : 'savings'}>
+            {Object.entries(assetClasses).map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="目前餘額（NT$）">
@@ -307,7 +310,7 @@ export function AccountForm({
         </Field>
       </div>
       <p className="info">
-        直接調整餘額用於期初設定或對帳，不會產生收入；負債請填未償還金額。已有關聯紀錄時不能更換帳戶類型。
+        直接調整餘額僅用於期初設定或對帳，不會產生收入。變更分類不會改變原有帳戶或紀錄。
       </p>
       {error && (
         <p role="alert" className="form-error">

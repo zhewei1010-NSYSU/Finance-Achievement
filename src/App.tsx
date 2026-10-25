@@ -25,6 +25,9 @@ import {
 import { money, today, uid } from './lib/finance'
 import {
   accountTotals,
+  assetGroups,
+  assetClasses,
+  accountClass,
   archiveGoal,
   matchesRecordDate,
   annualIncome,
@@ -36,15 +39,15 @@ import {
   periodStats,
   progress,
   reconcileBook,
-  removeAccount,
   removeGoal,
+  removeAccount,
   replaceRecord,
   saveAccount,
   saveGoal,
 } from './lib/ledger'
 import type { Book, BookAccount, Category, RecordItem, SavingGoal, LifeGoal } from './lib/ledger'
 import { AccountForm, LifeForm, RecordForm, SavingForm } from './components/BookForms'
-import { Empty, Field, Modal, Ring } from './components/UI'
+import { Countdown, Empty, Field, Modal, Ring } from './components/UI'
 import LifeCard from './components/LifeCard'
 
 type Page = 'home' | 'deposits' | 'accounts' | 'records' | 'goals'
@@ -56,6 +59,7 @@ type Dialog =
       goalId?: string
       initialType?: RecordItem['type']
     }
+  | { type: 'assets' }
   | { type: 'account'; account?: BookAccount }
   | { type: 'goal'; goal?: SavingGoal }
   | { type: 'life'; goal?: LifeGoal; create?: boolean }
@@ -67,10 +71,10 @@ type Dialog =
   | null
 const pages = [
   { id: 'home', name: '首頁', icon: LayoutDashboard },
-  { id: 'records', name: '收支紀錄', icon: List },
+  { id: 'records', name: '收入紀錄', icon: List },
   { id: 'deposits', name: '存錢明細', icon: PiggyBank },
   { id: 'goals', name: '儲蓄目標', icon: Target },
-  { id: 'accounts', name: '帳戶總覽', icon: Wallet },
+  { id: 'accounts', name: '我的資產', icon: Wallet },
 ] as const
 export default function App() {
   const [loaded] = useState(loadBook),
@@ -134,6 +138,7 @@ export default function App() {
       book.goals.find((g) => !g.archived && !g.completedAt) ??
       book.goals.find((g) => !g.archived),
     b = balances(book),
+    groups = assetGroups(book),
     total = accountTotals(book),
     monthly = periodStats(book, today().slice(0, 7)),
     annual = annualIncome(book, year),
@@ -239,7 +244,7 @@ export default function App() {
                         {{ income: '收入', expense: '支出', transfer: '轉帳' }[r.type]}
                       </span>
                       <small>
-                        {book.categories.find((c) => c.id === r.categoryId)?.name ?? '不列入收支'}
+                        {book.categories.find((c) => c.id === r.categoryId)?.name ?? '不列入收入'}
                       </small>
                     </>
                   )}
@@ -372,6 +377,7 @@ export default function App() {
           </span>
           <time>{g.deadline.replaceAll('-', '/')}</time>
         </div>
+        <Countdown deadline={g.deadline} />
         <div className="goal-bottom">
           <button
             className="button primary"
@@ -412,7 +418,7 @@ export default function App() {
               onClick={() =>
                 confirm(
                   '刪除這個儲蓄目標？',
-                  '存款與收支紀錄會保留，只解除目標關聯；帳戶餘額不會被刪除。',
+                  '存款與收入紀錄會保留，只解除目標關聯；帳戶餘額不會被刪除。',
                   () => commit(removeGoal(book, g.id)),
                 )
               }
@@ -590,7 +596,7 @@ export default function App() {
                   home: '把夢想，一點一點存下來。',
                   deposits: '每一筆累積，都有它的故事。',
                   accounts: '讓每筆錢，都有自己的位置。',
-                  records: '把日常記下來，收支就清楚了。',
+                  records: '記下每筆收入，看見自己的累積。',
                   goals: '為喜歡的未來，設定一個目標。',
                 }[page]
               }
@@ -607,7 +613,7 @@ export default function App() {
             onClick={() =>
               setDialog(
                 page === 'accounts'
-                  ? { type: 'account' }
+                  ? { type: 'assets' }
                   : page === 'goals'
                     ? { type: 'goal' }
                     : page === 'deposits'
@@ -618,12 +624,12 @@ export default function App() {
           >
             <Plus size={17} />
             {page === 'accounts'
-              ? '新增帳戶'
+              ? '管理資產'
               : page === 'goals'
                 ? '新增目標'
                 : page === 'deposits'
                   ? '新增存款'
-                  : '記一筆'}
+                  : '新增收入'}
           </button>
         </div>
         {page === 'home' && (
@@ -632,8 +638,13 @@ export default function App() {
               {[
                 ['目前總資產', total.assets, Wallet],
                 ['本月收入', monthly.income, ArrowDownLeft],
-                ['本月支出', monthly.expense, ArrowUpRight],
-                ['本月結餘', monthly.surplus, Landmark],
+                [
+                  '本月存入',
+                  allDeposits
+                    .filter((x) => x.record.date.startsWith(today().slice(0, 7)))
+                    .reduce((sum, x) => sum + x.record.amount, 0),
+                  PiggyBank,
+                ],
               ].map(([label, value, Icon]) => {
                 const I = Icon as typeof Wallet
                 return (
@@ -709,27 +720,20 @@ export default function App() {
               <aside className="dashboard-aside">
                 <section className="card mini-accounts">
                   <div className="section-heading">
-                    <h2>帳戶總覽</h2>
+                    <h2>我的資產</h2>
                     <button className="text-button" onClick={() => navigate('accounts')}>
                       管理
                       <ArrowUpRight size={14} />
                     </button>
                   </div>
-                  {book.accounts.slice(0, 4).map((a) => (
-                    <button
-                      className="account-row"
-                      key={a.id}
-                      onClick={() => setDialog({ type: 'account', account: a })}
-                    >
+                  {groups.map((group) => (
+                    <div className="account-row" key={group.id}>
                       <span className="account-symbol">
                         <Landmark size={17} />
                       </span>
-                      <span>
-                        <b>{a.name}</b>
-                        <small>{a.kind === 'asset' ? '資產' : '負債'}</small>
-                      </span>
-                      <strong>{money(b.get(a.id) ?? 0)}</strong>
-                    </button>
+                      <b>{group.name}</b>
+                      <strong>{money(group.amount)}</strong>
+                    </div>
                   ))}
                 </section>
                 <button
@@ -749,13 +753,13 @@ export default function App() {
             {lifeSection(false)}
             <section className="card recent-card">
               <div className="section-heading">
-                <h2>最近收支紀錄</h2>
+                <h2>最近收入紀錄</h2>
                 <button className="text-button" onClick={() => navigate('records')}>
                   全部紀錄
                   <ArrowUpRight size={15} />
                 </button>
               </div>
-              {recordList(sorted(book.records).slice(0, 5))}
+              {recordList(sorted(book.records.filter((r) => r.type === 'income')).slice(0, 5))}
             </section>
           </>
         )}
@@ -791,7 +795,7 @@ export default function App() {
               {recordList(sorted(filteredDeposits.map((x) => x.record)), true)}
             </section>
             <p className="footnote">
-              月份存款總額不受下方日期區間影響；日期查詢合計只計篩選結果。累積存款紀錄總額是已記錄存入金額的加總；每筆「存款後累積金額」依帳戶期初與所有有日期的收支重算，可能受支出及對帳調整影響。未記錄的舊版存款保留為帳戶餘額，不會捏造明細。
+              月份存款總額不受下方日期區間影響；日期查詢合計只計篩選結果。累積存款紀錄總額是已記錄存入金額的加總；每筆「存款後累積金額」依原有餘額、歷史紀錄與轉帳重算。未記錄的舊版存款保留為帳戶餘額，不會捏造明細。
             </p>
           </>
         )}
@@ -801,7 +805,7 @@ export default function App() {
               <label>
                 月份
                 <input
-                  aria-label="收支月份"
+                  aria-label="收入月份"
                   type="month"
                   value={month}
                   onChange={(e) => setMonth(e.target.value)}
@@ -824,23 +828,21 @@ export default function App() {
                 <span>{month ? '該月收入' : '全部收入'}</span>
                 <b>{money(periodStats(book, month).income)}</b>
               </div>
-              <div>
-                <span>{month ? '該月支出' : '全部支出'}</span>
-                <b>{money(periodStats(book, month).expense)}</b>
-              </div>
             </div>
-            {dateFilters('收支')}
+            {dateFilters('收入')}
             <section className="card table-card">
               {recordList(
                 sorted(
-                  book.records.filter((r) =>
-                    matchesRecordDate(r, { month, from: dateFrom, to: dateTo }),
+                  book.records.filter(
+                    (r) =>
+                      r.type === 'income' &&
+                      matchesRecordDate(r, { month, from: dateFrom, to: dateTo }),
                   ),
                 ),
               )}
             </section>
             <p className="footnote">
-              存款與一般收支共用同一筆紀錄。帳戶轉帳與信用卡還款不計入收入或支出。刪除、編輯會自動更新相關餘額。
+              僅列出實際收入，外部收入存款共用同一筆紀錄。帳戶轉帳不計入收入。歷史支出保留於本機資料且維持原有餘額影響。
             </p>
           </>
         )}
@@ -850,53 +852,28 @@ export default function App() {
               <span>
                 總資產 <b>{money(total.assets)}</b>
               </span>
-              <span>
-                總負債 <b>{money(total.debt)}</b>
-              </span>
-              <span>
-                淨資產 <b>{money(total.net)}</b>
-              </span>
             </div>
             <div className="accounts-grid">
-              {book.accounts.map((a) => (
-                <section className="card account-card" key={a.id}>
-                  <div className="section-heading">
-                    <span className="account-symbol">
-                      <Landmark size={22} />
-                    </span>
-                    <span className="record-tag">
-                      {a.kind === 'asset' ? '資產' : '負債／信用卡'}
-                    </span>
-                  </div>
-                  <h2>{a.name}</h2>
-                  <strong>{money(b.get(a.id) ?? 0)}</strong>
-                  <div className="account-actions">
-                    <button
-                      className="text-button"
-                      onClick={() => setDialog({ type: 'account', account: a })}
-                    >
-                      編輯帳戶
-                      <ArrowUpRight size={15} />
-                    </button>
-                    <button
-                      className="icon-button danger"
-                      aria-label={`刪除${a.name}`}
-                      onClick={() =>
-                        confirm(
-                          '刪除帳戶？',
-                          '帳戶餘額會被移除。已關聯紀錄或儲蓄目標的帳戶，必須先解除關聯。',
-                          () => commit(removeAccount(book, a.id)),
-                        )
-                      }
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+              {groups.map((group) => (
+                <section className="card account-card" key={group.id}>
+                  <span className="account-symbol">
+                    <Landmark size={22} />
+                  </span>
+                  <h2>{group.name}</h2>
+                  <strong>{money(group.amount)}</strong>
                 </section>
               ))}
             </div>
+            <div className="asset-tools">
+              <button
+                className="button secondary"
+                onClick={() => setDialog({ type: 'record', initialType: 'transfer' })}
+              >
+                資產間轉帳
+              </button>
+            </div>
             <p className="footnote">
-              原有餘額請透過「編輯帳戶」設定，不會列為本月收入。新的薪資與支出請使用收支紀錄；帳戶間移動請用轉帳。
+              三個分類包含所有資產帳戶，每筆資產只計算一次。分類間轉帳不增加總資產或收入；原有負債及歷史紀錄保留，不列入此資產合計。
             </p>
           </>
         )}
@@ -941,32 +918,37 @@ export default function App() {
                 ? '編輯紀錄'
                 : dialog.deposit
                   ? '新增存款'
-                  : '記錄一筆日常'
-              : dialog.type === 'account'
-                ? dialog.account
-                  ? '編輯帳戶'
-                  : '新增帳戶'
-                : dialog.type === 'goal'
-                  ? dialog.goal
-                    ? '編輯儲蓄目標'
-                    : '新增儲蓄目標'
-                  : dialog.type === 'life'
-                    ? dialog.create
-                      ? '新增人生目標'
-                      : '設定人生目標'
-                    : dialog.type === 'history'
-                      ? '我的完成紀錄'
-                      : dialog.type === 'help'
-                        ? '資料與隱私說明'
-                        : dialog.type === 'categories'
-                          ? '收入與支出類別'
-                          : dialog.type === 'category'
-                            ? dialog.category
-                              ? '編輯類別'
-                              : '新增類別'
-                            : dialog.title
+                  : dialog.initialType === 'transfer'
+                    ? '資產間轉帳'
+                    : '新增收入'
+              : dialog.type === 'assets'
+                ? '管理資產帳戶'
+                : dialog.type === 'account'
+                  ? dialog.account
+                    ? '編輯帳戶'
+                    : '新增帳戶'
+                  : dialog.type === 'goal'
+                    ? dialog.goal
+                      ? '編輯儲蓄目標'
+                      : '新增儲蓄目標'
+                    : dialog.type === 'life'
+                      ? dialog.create
+                        ? '新增人生目標'
+                        : '設定人生目標'
+                      : dialog.type === 'history'
+                        ? '我的完成紀錄'
+                        : dialog.type === 'help'
+                          ? '資料與隱私說明'
+                          : dialog.type === 'categories'
+                            ? '收入類別'
+                            : dialog.type === 'category'
+                              ? dialog.category
+                                ? '編輯類別'
+                                : '新增類別'
+                              : dialog.title
           }
           close={close}
+          wide={dialog.type === 'record' || dialog.type === 'assets'}
         >
           {dialog.type === 'record' ? (
             <RecordForm
@@ -985,16 +967,68 @@ export default function App() {
                 )
               }}
             />
+          ) : dialog.type === 'assets' ? (
+            <div className="asset-manage">
+              <p className="info">在三個分類中整理現有帳戶；重新分類不會改變資產或收入。</p>
+              {book.accounts
+                .filter((a) => a.kind === 'asset')
+                .map((a) => (
+                  <button
+                    className="account-row"
+                    key={a.id}
+                    onClick={() => setDialog({ type: 'account', account: a })}
+                  >
+                    <span>
+                      <b>{a.name}</b>
+                      <small>{assetClasses[accountClass(a)]}</small>
+                    </span>
+                    <strong>{money(b.get(a.id) ?? 0)}</strong>
+                    <Settings2 size={16} />
+                  </button>
+                ))}
+              <button className="button secondary" onClick={() => setDialog({ type: 'account' })}>
+                <Plus size={16} />
+                新增帳戶
+              </button>
+              <h3 className="transfer-heading">資產移動紀錄</h3>
+              {recordList(
+                sorted(
+                  book.records.filter(
+                    (r) =>
+                      r.type === 'transfer' &&
+                      book.accounts.find((a) => a.id === r.accountId)?.kind === 'asset' &&
+                      book.accounts.find((a) => a.id === r.toAccountId)?.kind === 'asset',
+                  ),
+                ),
+              )}
+            </div>
           ) : dialog.type === 'account' ? (
-            <AccountForm
-              book={book}
-              account={dialog.account}
-              close={close}
-              onSave={(a) => {
-                commit(saveAccount(book, a))
-                setNotice('帳戶已儲存。')
-              }}
-            />
+            <>
+              <AccountForm
+                book={book}
+                account={dialog.account}
+                close={close}
+                onSave={(a) => {
+                  commit(saveAccount(book, a))
+                  setNotice('帳戶已儲存。')
+                }}
+              />
+              {dialog.account && (
+                <button
+                  className="text-button danger"
+                  onClick={() => {
+                    const account = dialog.account!
+                    confirm(
+                      '刪除帳戶？',
+                      '僅可刪除未關聯紀錄或儲蓄目標的帳戶。此操作會移除該帳戶餘額。',
+                      () => commit(removeAccount(book, account.id)),
+                    )
+                  }}
+                >
+                  刪除帳戶
+                </button>
+              )}
+            </>
           ) : dialog.type === 'goal' ? (
             <SavingForm
               book={book}
@@ -1065,7 +1099,7 @@ export default function App() {
                 只提供公開網頁，無法提供私人資料庫或登入保護。
               </p>
               <p>
-                你的帳戶、存款與收支只保存在目前瀏覽器的本機儲存，沒有上傳
+                你的資產、存款與歷史紀錄只保存在目前瀏覽器的本機儲存，沒有上傳
                 GitHub。重新整理會保留；換瀏覽器、裝置、網址或清除網站資料後，不會自動同步或還原。
               </p>
               <p>
@@ -1081,41 +1115,43 @@ export default function App() {
                 <Plus size={16} />
                 新增類別
               </button>
-              {book.categories.map((c) => (
-                <div key={c.id}>
-                  <span>
-                    {c.name}
-                    <small>{c.type === 'income' ? '收入' : '支出'}</small>
-                  </span>
-                  <button
-                    className="icon-button"
-                    aria-label={`編輯類別${c.name}`}
-                    onClick={() => setDialog({ type: 'category', category: c })}
-                  >
-                    <Settings2 size={16} />
-                  </button>
-                  <button
-                    className="icon-button danger"
-                    aria-label={`刪除類別${c.name}`}
-                    onClick={() =>
-                      confirm(
-                        '刪除類別？',
-                        '已被紀錄使用的類別無法刪除，請先調整相關紀錄。',
-                        () => {
-                          if (book.records.some((r) => r.categoryId === c.id))
-                            throw new Error('此類別仍有紀錄，請先修改相關紀錄。')
-                          commit({
-                            ...book,
-                            categories: book.categories.filter((x) => x.id !== c.id),
-                          })
-                        },
-                      )
-                    }
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
+              {book.categories
+                .filter((c) => c.type === 'income')
+                .map((c) => (
+                  <div key={c.id}>
+                    <span>
+                      {c.name}
+                      <small>收入</small>
+                    </span>
+                    <button
+                      className="icon-button"
+                      aria-label={`編輯類別${c.name}`}
+                      onClick={() => setDialog({ type: 'category', category: c })}
+                    >
+                      <Settings2 size={16} />
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      aria-label={`刪除類別${c.name}`}
+                      onClick={() =>
+                        confirm(
+                          '刪除類別？',
+                          '已被紀錄使用的類別無法刪除，請先調整相關紀錄。',
+                          () => {
+                            if (book.records.some((r) => r.categoryId === c.id))
+                              throw new Error('此類別仍有紀錄，請先修改相關紀錄。')
+                            commit({
+                              ...book,
+                              categories: book.categories.filter((x) => x.id !== c.id),
+                            })
+                          },
+                        )
+                      }
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
             </div>
           ) : dialog.type === 'category' ? (
             <CategoryForm
@@ -1217,7 +1253,7 @@ function CategoryForm({
         e.preventDefault()
         const v = Object.fromEntries(new FormData(e.currentTarget))
         try {
-          onSave(categorySchema.parse({ id: category?.id ?? uid(), name: v.name, type: v.type }))
+          onSave(categorySchema.parse({ id: category?.id ?? uid(), name: v.name, type: 'income' }))
           close()
         } catch (e) {
           setError(e instanceof Error ? e.message : '請檢查輸入')
@@ -1226,12 +1262,6 @@ function CategoryForm({
     >
       <Field label="類別名稱">
         <input name="name" maxLength={80} defaultValue={category?.name} required />
-      </Field>
-      <Field label="類別用途">
-        <select name="type" defaultValue={category?.type ?? 'expense'}>
-          <option value="income">收入</option>
-          <option value="expense">支出</option>
-        </select>
       </Field>
       {error && (
         <p className="form-error" role="alert">

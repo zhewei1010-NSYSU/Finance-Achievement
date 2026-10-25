@@ -2446,3 +2446,122 @@ footer .text-button {
     min-height: 37px;
   }
 }
+
+/* Keep the existing white dashboard, with generous dialogs and three asset groups. */
+.overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.modal-backdrop {
+  animation: modal-fade-in 180ms ease-out both;
+}
+.modal {
+  animation: modal-pop-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.modal.wide {
+  max-width: 720px;
+  padding: 34px;
+  border-radius: 24px;
+}
+.modal.wide .modal-heading h2 {
+  font-size: 25px;
+  color: #24262a;
+}
+.modal.wide .field {
+  font-size: 15px;
+  color: #4b5057;
+}
+.modal.wide .field input,
+.modal.wide .field select {
+  font-size: 16px;
+  min-height: 50px;
+  border-radius: 12px;
+}
+.modal.wide input[name='amount'] {
+  font-size: 24px;
+  font-weight: 650;
+}
+.modal.wide .form-actions .button {
+  min-height: 48px;
+  font-size: 15px;
+}
+.countdown {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: #565b63;
+  font-size: 14px;
+  margin: 16px 0 20px;
+}
+.countdown b {
+  color: #24262a;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.countdown-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9399a0;
+  margin-right: 4px;
+}
+.life-card .countdown {
+  justify-content: flex-start;
+}
+.asset-tools {
+  margin: 24px 0;
+}
+.asset-manage .account-row {
+  width: 100%;
+}
+.asset-manage > .button {
+  margin-top: 20px;
+}
+.transfer-heading {
+  margin: 28px 0 15px;
+  font-size: 17px;
+}
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modal-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (max-width: 700px) {
+  .overview-grid {
+    gap: 8px;
+  }
+  .overview-grid .metric-card {
+    padding: 12px 8px;
+  }
+  .overview-grid .metric-card strong {
+    font-size: clamp(15px, 4vw, 21px);
+    overflow-wrap: anywhere;
+  }
+  .overview-grid .metric-card > div {
+    font-size: 10px;
+  }
+  .overview-grid .metric-card svg,
+  .overview-grid .metric-card small {
+    display: none;
+  }
+  .modal.wide {
+    padding: 22px 18px;
+    border-radius: 20px;
+  }
+  .modal.wide .modal-heading h2 {
+    font-size: 22px;
+  }
+}
