@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDownLeft,
@@ -76,7 +77,13 @@ const pages = [
   { id: 'goals', name: '儲蓄目標', icon: Target },
   { id: 'accounts', name: '我的資產', icon: Wallet },
 ] as const
-export default function App({ storage = localBookStorage }: { storage?: BookStorage }) {
+export default function App({
+  storage = localBookStorage,
+  accountAction,
+}: {
+  storage?: BookStorage
+  accountAction?: ReactNode
+}) {
   const [loaded] = useState(() => storage.load()),
     [book, setBook] = useState(loaded.book),
     [page, setPage] = useState<Page>('home'),
@@ -575,6 +582,7 @@ export default function App({ storage = localBookStorage }: { storage?: BookStor
               </button>
             ))}
           </nav>
+          {accountAction}
           <button
             className="icon-button privacy-button"
             aria-label="資料與隱私說明"

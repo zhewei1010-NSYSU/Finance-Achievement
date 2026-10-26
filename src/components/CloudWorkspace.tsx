@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import App from '../App'
 import { CloudBookStore, cloudAPI, supabase } from '../lib/cloud'
 import { emptyBook, loadBook } from '../lib/ledger'
 import type { Book } from '../lib/ledger'
+import { Modal } from './UI'
+import { UserRound, Eye, EyeOff } from 'lucide-react'
 
 export function downloadBook(book: Book, label: string) {
   const blob = new Blob([JSON.stringify(book, null, 2)], { type: 'application/json' })
@@ -213,6 +215,13 @@ export default function CloudWorkspace() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
+  const [signup, setSignup] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const closeLogin = useCallback(() => {
+    setShowLogin(false)
+    setPassword('')
+    setShowPassword(false)
+  }, [])
   useEffect(() => {
     if (!supabase) return
     let active = true
@@ -233,23 +242,24 @@ export default function CloudWorkspace() {
       data.subscription.unsubscribe()
     }
   }, [])
-  async function authenticate(signup: boolean) {
+  async function authenticate() {
     if (busy || !supabase) return
     setBusy(true)
     setMessage('')
     try {
       const result = signup
         ? await supabase.auth.signUp({
-            email,
+            email: email.trim(),
             password,
             options: {
               emailRedirectTo: new URL(import.meta.env.BASE_URL, location.origin).href,
             },
           })
-        : await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signInWithPassword({ email: email.trim(), password })
       if (result.error) throw result.error
       setPassword('')
       setMessage(signup ? '註冊已送出，請至信箱確認，再回到本站登入。' : '登入成功。')
+      if (signup) setSignup(false)
     } catch {
       setMessage('登入／註冊失敗，請確認信箱、密碼、確認信與網路；也可能超過寄信頻率限制。')
     } finally {
@@ -265,69 +275,111 @@ export default function CloudWorkspace() {
   if (user) return <SignedIn key={user.id} user={user} />
   return (
     <>
-      <App />
-      <section className="cloud-panel" aria-label="登入與同步">
-        <b>此裝置本機模式 · 不會跨裝置同步</b>
-        {!supabase ? (
-          <p>
-            雲端同步尚未設定。請依 docs/PWA-SUPABASE.md 設定 Supabase
-            後重新建置；目前仍可使用原本機帳簿。
-          </p>
-        ) : (
-          <>
-            <button aria-expanded={showLogin} onClick={() => setShowLogin((v) => !v)}>
-              登入／建立帳號
+      <App
+        accountAction={
+          supabase ? (
+            <button
+              className="account-login"
+              onClick={() => {
+                setMessage('')
+                setShowLogin(true)
+              }}
+            >
+              <UserRound size={18} />
+              <span>登入</span>
             </button>
-            {showLogin && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void authenticate(false)
+          ) : undefined
+        }
+      />
+      {showLogin && (
+        <Modal title={signup ? '建立理財帳號' : '歡迎回來'} close={closeLogin}>
+          <div className="auth-content">
+            <p className="auth-intro">登入後，手機與電腦就能共用你的理財帳簿。</p>
+            <div className="auth-tabs" role="group" aria-label="登入或註冊">
+              <button
+                type="button"
+                aria-pressed={!signup}
+                disabled={busy}
+                onClick={() => {
+                  setSignup(false)
+                  setMessage('')
                 }}
               >
-                <label>
-                  電子郵件
-                  <input
-                    autoComplete="email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </label>
-                <label>
-                  密碼
-                  <input
-                    autoComplete="current-password"
-                    type="password"
-                    minLength={8}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </label>
-                <div className="cloud-actions">
-                  <button disabled={busy} type="submit">
-                    登入
-                  </button>
-                  <button
-                    disabled={busy || !email || password.length < 8}
-                    type="button"
-                    onClick={() => void authenticate(true)}
-                  >
-                    註冊
-                  </button>
-                </div>
-                <p>
-                  建議使用獨立密碼；忘記密碼時可由 Supabase
-                  管理員寄送復原信。不要在公用裝置保存財務資料。
+                登入
+              </button>
+              <button
+                type="button"
+                aria-pressed={signup}
+                disabled={busy}
+                onClick={() => {
+                  setSignup(true)
+                  setMessage('')
+                }}
+              >
+                建立帳號
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void authenticate()
+              }}
+              aria-busy={busy}
+            >
+              <label htmlFor="auth-email">電子郵件</label>
+              <input
+                id="auth-email"
+                name="email"
+                autoComplete="username"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                type="email"
+                required
+                disabled={busy}
+                value={email}
+                placeholder="you@example.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <label htmlFor="auth-password">密碼</label>
+              <div className="auth-password">
+                <input
+                  id="auth-password"
+                  name="password"
+                  autoComplete={signup ? 'new-password' : 'current-password'}
+                  type={showPassword ? 'text' : 'password'}
+                  minLength={signup ? 8 : undefined}
+                  required
+                  disabled={busy}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? '隱藏密碼' : '顯示密碼'}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((v) => !v)}
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+              {signup && <p className="auth-hint">密碼至少 8 個字元；註冊後請到信箱點確認信。</p>}
+              {message && (
+                <p className="auth-message" role="status">
+                  {message}
                 </p>
-              </form>
-            )}
-          </>
-        )}
-        {message && <p role="status">{message}</p>}
-      </section>
+              )}
+              <button className="auth-submit" type="submit" disabled={busy}>
+                {busy ? '處理中…' : signup ? '建立帳號' : '登入並同步帳簿'}
+              </button>
+            </form>
+            <p className="auth-hint">
+              此裝置會保持登入，下次開啟不必再輸入密碼。請使用自己的裝置，使用完也可手動登出。
+            </p>
+            <p className="auth-hint">尚未登入時，原本機帳簿仍保留；登入不會自動覆蓋或匯入資料。</p>
+          </div>
+        </Modal>
+      )}
     </>
   )
 }

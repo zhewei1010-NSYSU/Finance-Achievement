@@ -6,7 +6,16 @@ import { defaultSupabaseUrl, defaultSupabasePublishableKey } from './supabaseCon
 
 const url = import.meta.env.VITE_SUPABASE_URL || defaultSupabaseUrl
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || defaultSupabasePublishableKey
-export const supabase = url && key ? createClient(url, key) : null
+export const supabase =
+  url && key
+    ? createClient(url, key, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      })
+    : null
 
 export type CloudRow = { book: Book; revision: number; mutation_id: string | null }
 export type Draft = CloudRow & { owner: string; dirty: boolean; operation: string }
