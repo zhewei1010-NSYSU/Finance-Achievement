@@ -32,10 +32,8 @@ import {
   matchesRecordDate,
   annualIncome,
   balances,
-  BOOK_KEY,
   categorySchema,
   depositRows,
-  loadBook,
   periodStats,
   progress,
   reconcileBook,
@@ -49,6 +47,8 @@ import type { Book, BookAccount, Category, RecordItem, SavingGoal, LifeGoal } fr
 import { AccountForm, LifeForm, RecordForm, SavingForm } from './components/BookForms'
 import { Countdown, Empty, Field, Modal, Ring } from './components/UI'
 import LifeCard from './components/LifeCard'
+import { localBookStorage } from './lib/bookStorage'
+import type { BookStorage } from './lib/bookStorage'
 
 type Page = 'home' | 'deposits' | 'accounts' | 'records' | 'goals'
 type Dialog =
@@ -76,8 +76,8 @@ const pages = [
   { id: 'goals', name: '儲蓄目標', icon: Target },
   { id: 'accounts', name: '我的資產', icon: Wallet },
 ] as const
-export default function App() {
-  const [loaded] = useState(loadBook),
+export default function App({ storage = localBookStorage }: { storage?: BookStorage }) {
+  const [loaded] = useState(() => storage.load()),
     [book, setBook] = useState(loaded.book),
     [page, setPage] = useState<Page>('home'),
     [selected, setSelected] = useState(''),
@@ -100,14 +100,14 @@ export default function App() {
     if (loaded.error) return
     try {
       const raw = JSON.stringify(loaded.book)
-      localStorage.setItem(BOOK_KEY, raw)
+      storage.write(raw)
       savedRef.current = raw
       if (loaded.migrated)
         setNotice('原有帳戶、目標與紀錄已帶入。舊版原始資料仍保留，沒有新增虛構收入。')
     } catch {
       setError('無法儲存本機資料，請檢查瀏覽器空間與網站權限。')
     }
-  }, [loaded])
+  }, [loaded, storage])
   useEffect(() => {
     if (!notice) return
     const timer = setTimeout(() => setNotice(''), 5500)
@@ -115,12 +115,12 @@ export default function App() {
   }, [notice])
   useEffect(() => {
     const handler = (e: StorageEvent) => {
-      if (e.key === BOOK_KEY && e.newValue !== savedRef.current)
+      if (e.key === storage.key && storage.read() !== savedRef.current)
         setError('另一個分頁已更新資料，請重新整理後再編輯，避免覆蓋新資料。')
     }
     window.addEventListener('storage', handler)
     return () => window.removeEventListener('storage', handler)
-  }, [])
+  }, [storage])
   useEffect(() => {
     if (!animation.key) return
     const eventKey = animation.key
@@ -147,10 +147,10 @@ export default function App() {
     if (loaded.error) throw new Error('原始資料尚未修復，已暫停編輯。')
     const result = reconcileBook(next)
     try {
-      if (localStorage.getItem(BOOK_KEY) !== savedRef.current)
+      if (storage.read() !== savedRef.current)
         throw new Error('資料已由其他分頁更新，請先重新整理。')
       const raw = JSON.stringify(result.book)
-      localStorage.setItem(BOOK_KEY, raw)
+      storage.write(raw)
       savedRef.current = raw
     } catch (e) {
       const message =

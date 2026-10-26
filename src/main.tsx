@@ -1,9 +1,10 @@
-import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
+import CloudWorkspace from './components/CloudWorkspace'
+import PwaStatus from './components/PwaStatus'
 import './style.css'
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  <>
+    <CloudWorkspace />
+    <PwaStatus />
+  </>,
 )
