@@ -313,7 +313,11 @@ test('手機320px至桌面版正常，主要文字深色，沒有健康分數或
   await page.screenshot({ path: 'artifacts/finance-desktop.png', fullPage: true })
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 })
-    for (const name of ['首頁', '存錢明細', '我的資產', '收入紀錄', '儲蓄目標']) {
+    const names =
+      width <= 700
+        ? ['首頁', '我的資產', '儲蓄目標']
+        : ['首頁', '存錢明細', '我的資產', '收入紀錄', '儲蓄目標']
+    for (const name of names) {
       await page.getByRole('navigation').getByRole('button', { name, exact: true }).click()
       await expect(page.locator('h1')).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

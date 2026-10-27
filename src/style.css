@@ -1678,6 +1678,9 @@ footer .text-button {
     width: 18px;
     height: 18px;
   }
+  .main-nav button.desktop-nav-only {
+    display: none;
+  }
   .app-shell {
     padding-bottom: 72px;
   }

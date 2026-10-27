@@ -574,7 +574,12 @@ export default function App({
                 key={p.id}
                 aria-label={p.name}
                 aria-current={page === p.id ? 'page' : undefined}
-                className={page === p.id ? 'active' : ''}
+                className={[
+                  page === p.id ? 'active' : '',
+                  p.id === 'records' || p.id === 'deposits' ? 'desktop-nav-only' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onClick={() => navigate(p.id)}
               >
                 <p.icon size={16} />
